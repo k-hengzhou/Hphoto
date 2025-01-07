@@ -1,0 +1,36 @@
+# 基础依赖
+PyQt5>=5.15.0
+numpy>=1.19.0
+opencv-python>=4.5.0
+Pillow>=8.0.0
+
+# 人脸识别相关
+insightface>=0.7.0
+onnxruntime>=1.8.0
+onnxruntime-gpu>=1.8.0  # 如果使用GPU
+scikit-learn>=0.24.0
+
+# 图像处理相关
+scikit-image>=0.18.0
+tensorflow>=2.5.0  # 用于图像预处理
+tensorflow-hub>=0.12.0
+
+# 内容审核相关
+nudenet>=2.0.9
+
+# 文件监控
+watchdog>=2.1.0
+
+# UI美化
+qtawesome>=1.1.0
+
+# 系统监控
+psutil>=5.8.0
+
+# 工具类
+tqdm>=4.62.0  # 进度条
+pathlib>=1.0.1
+
+# 可选依赖（性能优化）
+cupy>=9.0.0  # CUDA加速，可选
+numba>=0.53.0  # 代码加速，可选 

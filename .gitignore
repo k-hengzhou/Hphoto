@@ -1,0 +1,59 @@
+# 依赖目录
+node_modules/
+vendor/
+
+# 编译输出
+dist/
+build/
+out/
+#模型
+
+model
+.insightface
+# 环境配置文件
+.env
+.env.local
+.env.*.local
+
+# IDE 配置文件
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# 操作系统生成的文件
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 临时文件
+*.swp
+*.swo
+.tmp/
+temp/
+
+# 测试覆盖率报告
+coverage/
+
+# 本地配置文件
+config.local.js
+*.local.json
+
+#数据
+lady
+
+# 包管理器锁定文件（根据需要取消注释）
+# package-lock.json
+# yarn.lock 
+
+# PyInstaller
+*.spec
+build/
+dist/
+__pycache__/ 
+

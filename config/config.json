@@ -1,0 +1,43 @@
+{
+    "last_folder": "D:/project/Hphoto/lady/Marupi",
+    "window_state": {
+        "width": 1500,
+        "height": 900,
+        "x": 100,
+        "y": 100,
+        "maximized": false
+    },
+    "face_recognition": {
+        "threshold": 0.5,
+        "backup_db": false,
+        "db_path": "D:/project/小程序/pkl/known_faces_op.pkl",
+        "update_db": true
+    },
+    "clean_db": {
+        "output_path": "D:/project/小程序/known_faces.pkl",
+        "method": "dbscan",
+        "eps": 0.6,
+        "min_samples": 1,
+        "backup": false
+    },
+    "face_clustering": {
+        "min_samples": 5,
+        "eps": 0.3
+    },
+    "nsfw_classifier": {
+        "unsafe_threshold": 0.6,
+        "model_path": "D:/project/Hphoto/model/640m.onnx",
+        "providers": "CPU",
+        "nsfw_class": [
+            "FEMALE_GENITALIA_COVERED",
+            "BUTTOCKS_EXPOSED",
+            "FEMALE_BREAST_EXPOSED",
+            "FEMALE_GENITALIA_EXPOSED",
+            "ANUS_EXPOSED",
+            "FEET_EXPOSED",
+            "ANUS_COVERED",
+            "FEMALE_BREAST_COVERED",
+            "BUTTOCKS_COVERED"
+        ]
+    }
+}
