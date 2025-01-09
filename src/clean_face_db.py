@@ -1,6 +1,15 @@
+# 清理人脸数据库
+# 输入：人脸数据库
+# 输出：清理后的人脸数据库
+# 功能：将人脸数据库中的人脸向量进行聚类，并保存到清理后的人脸数据库中
+# 人脸数据库格式：{人脸名: [人脸向量]}
+# 人脸名：图片所在的最后一层目录名
+# 人脸向量：图片中的人脸向量
+# 清理后的人脸数据库用于人脸识别，将人脸识别结果与清理后的人脸数据库进行匹配，找到人脸
+
 import os
 import numpy as np
-import pickle
+import msgpack
 from sklearn.cluster import DBSCAN
 from collections import Counter
 from tqdm import tqdm
@@ -11,7 +20,11 @@ def load_face_db(db_path):
     if os.path.exists(db_path):
         try:
             with open(db_path, 'rb') as f:
-                db = pickle.load(f)
+                packed_data = msgpack.load(f)
+                # 转换numpy数组
+                db = {}
+                for name, faces in packed_data.items():
+                    db[name] = [np.array(face, dtype=np.float32) for face in faces]
             print(f"已加载人脸数据库，包含 {len(db)} 个人脸")
             return db
         except Exception as e:
@@ -22,19 +35,17 @@ def load_face_db(db_path):
 def save_face_db(db_path, face_db, backup=True):
     """保存人脸数据库，可选是否备份原文件"""
     try:
-        # if backup and os.path.exists(db_path):
-        #     # 创建备份文件
-        #     backup_path = f"{db_path}.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
-        #     os.rename(db_path, backup_path)
-        #     print(f"已创建备份文件: {backup_path}")
         db_to_save = {}
-        for name,faces in face_db.items():
+        for name, faces in face_db.items():
             db_to_save[name] = []
             for face in faces:
-                embedding=face
-                db_to_save[name].append(embedding.astype(np.float32) if not isinstance(embedding, np.ndarray) else embedding)
+                embedding = face
+                # 将numpy数组转换为列表以便序列化
+                db_to_save[name].append(
+                    embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
+                )
         with open(db_path, 'wb') as f:
-            pickle.dump(db_to_save, f)
+            msgpack.dump(db_to_save, f)
         print(f"人脸数据库已保存: {db_path}")
     except Exception as e:
         print(f"保存人脸数据库失败: {str(e)}")

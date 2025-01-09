@@ -1,4 +1,8 @@
-# 导入必要的库
+# 人脸识别照片整理工具
+# 功能：将照片整理到指定目录，并创建人脸数据库
+# 输入：照片目录
+# 输出：整理后的照片目录，人脸数据库
+
 from face_organizer import FaceOrganizer    # 导入人脸识别器类
 import argparse                             # 用于处理命令行参数
 import os                                   # 用于处理文件路径

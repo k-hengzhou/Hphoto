@@ -15,10 +15,6 @@ from .remove_duplicates import DuplicateRemover
 import threading
 import sip
 import shutil
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-from PyQt5.QtWidgets import QStyle
-from PyQt5.QtGui import QIcon
 import qtawesome as qta
 import time
 import cv2
@@ -27,147 +23,34 @@ from .clean_face_db import clean_face_database
 from .face_clustering import FaceClusterer
 import psutil
 from .nsfw_classifier import NSFWClassifier,default_nsfw_class
+from .styles import *
+
+# 在创建QApplication之前设置高DPI缩放
+QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
+
 class VSCodeTooltip(QWidget):
     def __init__(self, title, shortcut=None, description=None, parent=None):
-        super().__init__(parent, Qt.ToolTip | Qt.FramelessWindowHint)  # 设置为工具提示窗口
+        super().__init__(parent, Qt.ToolTip | Qt.FramelessWindowHint)
         self.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        # 设置样式
-        self.setStyleSheet("""
-            VSCodeTooltip {
-                background-color: #252526;
-                border: 1px solid #454545;
-                border-radius: 4px;
-            }
-            QLabel {
-                color: #cccccc;
-                font-family: "Segoe UI", Arial;
-                font-size: 12px;
-                padding: 4px;
-            }
-        """)
-        
-        # 创建布局
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(4)
-        
-        # 添加内容
-        header = QHBoxLayout()
-        title_label = QLabel(title)
-        title_label.setStyleSheet("font-weight: bold;")
-        shortcut_label = QLabel(shortcut)
-        shortcut_label.setStyleSheet("color: #858585;")
-        
-        header.addWidget(title_label)
-        header.addWidget(shortcut_label)
-        layout.addLayout(header)
-        
-        if description:
-            desc_label = QLabel(description)
-            desc_label.setStyleSheet("color: #858585;")
-            desc_label.setWordWrap(True)
-            layout.addWidget(desc_label)
+        self.setStyleSheet(TOOLTIP_STYLE)
+
 class QMessageBox(QMessageBox):
     def __init__(self, parent=None):
         super().__init__(parent)
-        # self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        # 设置透明背景
-        # self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setStyleSheet("""
-            QMessageBox {
-                background-color: rgba(32, 32, 32, 0.85);
-                border: none;
-                border-radius: 4px;
-                padding: 10px;
-                font-family: "Segoe UI", Arial;
-                font-size: 24px;    
-                color: rgba(255, 255, 255, 0.95);
-            }
-            QMessageBox QLabel {
-                color: rgba(255, 255, 255, 0.95);
-            }
-            QMessageBox QPushButton {
-                background-color: rgba(98, 114, 164, 0.9);
-                color: rgba(255, 255, 255, 0.95);
-                border: none;
-                border-radius: 4px;
-                padding: 10px 10px;
-                font-family: "Segoe UI", Arial;
-                font-size: 14px;
-            }
-            QMessageBox QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.3);
-            
-            }   
-        """) 
-    @staticmethod
-    def information(parent, title, text):
-        msg = QMessageBox(parent)
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowTitle(title)
-        msg.setText(text)
-        msg.setStandardButtons(QMessageBox.Ok)
-        return msg.exec_()
+        self.setStyleSheet(MESSAGE_BOX_STYLE)
 
-    @staticmethod
-    def warning(parent, title, text):
-        msg = QMessageBox(parent)
-        msg.setIcon(QMessageBox.Warning)
-        msg.setWindowTitle(title)
-        msg.setText(text)
-        msg.setStandardButtons(QMessageBox.Ok)
-        return msg.exec_()
-
-    @staticmethod
-    def critical(parent, title, text):
-        msg = QMessageBox(parent)
-        msg.setIcon(QMessageBox.Critical)
-        msg.setWindowTitle(title)
-        msg.setText(text)
-        msg.setStandardButtons(QMessageBox.Ok)
-        return msg.exec_()
-    @staticmethod
-    def question(parent, title, text):
-        msg = QMessageBox(parent)
-        msg.setIcon(QMessageBox.Question)
-        msg.setWindowTitle(title)
-        msg.setText(text)
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        return msg.exec_()
 class KeyButton(QPushButton):
     def __init__(self, text, tooltip=None, parent=None):
         super().__init__(text, parent)
-        self.setFixedSize(45, 45)  # 设置固定大小
+        self.setFixedSize(45, 45)
         self.tooltip_widget = None
         if tooltip:
             self.tooltip_widget = VSCodeTooltip(tooltip)
-            self.tooltip_widget.hide()  # 初始时隐藏    
-        self.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                border: none;
-                color: #cccccc;
-                font-family: "Segoe UI", Arial;
-                font-size: 24px;
-                padding: 0px;
-                margin: 2px;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.3);
-            }
-                                       /* 工具提示样式 */
-            QToolTip {
-                background-color: #252526;
-                border: 1px solid #454545;
-                color: #cccccc;
-                padding: 20px;
-                font-family: "Segoe UI", Arial;
-                font-size: 12px;
-                border-radius: 4px;
-            }
-        """)
+            self.tooltip_widget.hide()
+        self.setStyleSheet(BUTTON_STYLE)
         self.installEventFilter(self)
     def showTooltip(self):
         # 获取提示框的大小
@@ -207,6 +90,7 @@ class KeyButton(QPushButton):
                         self.tooltip_widget.hide()
                         self.tooltip_widget.close()
         return super().eventFilter(obj, event)
+
 class PhotoManager(QMainWindow):
     def __init__(self):
 
@@ -237,26 +121,30 @@ class PhotoManager(QMainWindow):
         title_layout.setSpacing(15)
         
         # 创建左侧功能按钮容器
-        left_buttons = QHBoxLayout()
-        left_buttons.setSpacing(15)
-        
-        # 添加功能按钮到左侧容器
-        self.open_btn = KeyButton("", tooltip="打开文件夹")
-        self.open_btn.setIcon(qta.icon('fa5s.folder-open', color='#c8c8c8'))
-        self.folder_btn = KeyButton("", tooltip="添加文件夹")
-        self.folder_btn.setIcon(qta.icon('fa5s.folder', color='#c8c8c8'))
-        self.file_btn = KeyButton("", tooltip="添加文件")
-        self.file_btn.setIcon(qta.icon('fa5s.file-image', color='#c8c8c8'))
-        self.register_btn = KeyButton("", tooltip="人脸注册")
+        # left_buttons = QHBoxLayout()
+        # left_buttons.setSpacing(15)
+        left_button = QPushButton()
+        left_button.setIcon(qta.icon('fa5s.bars', color='#c8c8c8'))
+        left_button.setIconSize(QSize(24, 24))
+        left_button.setStyleSheet(SWITCH_BUTTON_STYLE)
+
+
+        # 创建一个下拉菜单
+        self.function_menu = QMenu()
+        self.function_menu.setStyleSheet(MENU_STYLE)
+        self.open_btn = self.function_menu.addAction("打开照片库")
+        self.open_btn.setIcon(qta.icon('fa5s.images', color='#c8c8c8'))
+        self.register_btn = self.function_menu.addAction("人脸注册")
         self.register_btn.setIcon(qta.icon('fa5s.user-plus', color='#c8c8c8'))
-        self.refresh_btn = KeyButton("", tooltip="刷新")
-        self.refresh_btn.setIcon(qta.icon('fa5s.sync', color='#c8c8c8'))
-        self.setting_btn = KeyButton("", tooltip="设置")
+        self.folder_btn =self.function_menu.addAction("添加文件夹")
+        self.folder_btn.setIcon(qta.icon('fa5s.folder', color='#c8c8c8'))
+        self.file_btn=self.function_menu.addAction("添加文件")
+        self.file_btn.setIcon(qta.icon('fa5s.file-image', color='#c8c8c8'))
+        self.setting_btn = self.function_menu.addAction("设置")
         self.setting_btn.setIcon(qta.icon('fa5s.cog', color='#c8c8c8'))
+        left_button.setMenu(self.function_menu)
+
         
-        for btn in (self.open_btn, self.folder_btn, self.file_btn, 
-                    self.register_btn, self.refresh_btn, self.setting_btn):
-            left_buttons.addWidget(btn)
         
         # 创建中间的切换按钮容器
         center_buttons = QHBoxLayout()
@@ -289,22 +177,8 @@ class PhotoManager(QMainWindow):
         
         # 设置切换按钮样式
         for btn in (self.left_btn, self.right_btn):
-            btn.setFixedSize(36, 36)  # 稍微增大按钮尺寸
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: rgba(45, 45, 45, 0.4);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 18px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(60, 60, 60, 0.6);
-                    border: 1px solid rgba(255, 255, 255, 0.2);
-                }
-                QPushButton:disabled {
-                    background-color: rgba(45, 45, 45, 0.2);
-                    border: 1px solid rgba(255, 255, 255, 0.05);
-                }
-            """)
+            btn.setFixedSize(48, 48)  # 增大尺寸
+            btn.setStyleSheet(SWITCH_BUTTON_STYLE)
         
         # 初始状态
         self.left_btn.setEnabled(False)
@@ -332,23 +206,24 @@ class PhotoManager(QMainWindow):
         close_btn.setIcon(qta.icon('fa5s.window-close', color='#c8c8c8'))
         
         for btn in (min_btn, max_btn, close_btn):
-            btn.setFixedSize(70, 70)
+            btn.setFixedSize(70, 70)  # 保持原有尺寸
             right_buttons.addWidget(btn)
         
         # 将三个部分添加到标题栏布局
-        title_layout.addLayout(left_buttons)
+        
+        title_layout.addWidget(left_button)
+        title_layout.addStretch()
         title_layout.addStretch()
         title_layout.addLayout(center_buttons)
         title_layout.addStretch()
         title_layout.addLayout(right_buttons)
         
         # 连接按钮信号
-        self.open_btn.clicked.connect(self.open_folder)
-        self.folder_btn.clicked.connect(self.add_folder)
-        self.file_btn.clicked.connect(self.add_file)
-        self.register_btn.clicked.connect(lambda: self.register_face())
-        self.refresh_btn.clicked.connect(lambda: self.refresh_folder())
-        self.setting_btn.clicked.connect(self.setting)
+        self.open_btn.triggered.connect(self.open_folder)
+        self.folder_btn.triggered.connect(self.add_folder)
+        self.file_btn.triggered.connect(self.add_file)
+        self.register_btn.triggered.connect(lambda: self.register_face())
+        self.setting_btn.triggered.connect(self.setting)
         
         # 连接切换按钮信号
         self.left_btn.clicked.connect(lambda: self.switch_cards_page(True))
@@ -388,8 +263,13 @@ class PhotoManager(QMainWindow):
             threshold = get_config(self.config,'face_recognition','threshold',0.5)
             update_db = get_config(self.config,'face_recognition','update_db',True)
             backup_db = get_config(self.config,'face_recognition','backup_db',False)
+            ingest_model_path = get_config(self.config,'face_recognition','insightface_model_path','model')
+            ingest_model_provider = get_config(self.config,'face_recognition','insightface_model_provider','CPUExecutionProvider')
+            face_confidence = get_config(self.config,'face_recognition','face_confidence',0.5)
             self.face_organizer = FaceOrganizer(
-                model_path="models/buffalo_l.onnx",
+                model_path=ingest_model_path,
+                providers=ingest_model_provider,
+                confidence=face_confidence,
                 faces_db_path=faces_db_path,  # 数据库路径
                 threshold=threshold,                    # 匹配阈值
                 update_db=update_db,                  # 允许更新数据库
@@ -424,12 +304,7 @@ class PhotoManager(QMainWindow):
         
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: rgba(32, 32, 32, 1);
-                border: none;
-            }
-        """)
+        self.scroll_area.setStyleSheet(MAIN_WINDOW_STYLE)
         self.cards_layout.addWidget(self.scroll_area)
         
         # 创建第二个页面和滚动区域
@@ -438,12 +313,7 @@ class PhotoManager(QMainWindow):
         
         self.scroll_area_2 = QScrollArea()
         self.scroll_area_2.setWidgetResizable(True)
-        self.scroll_area_2.setStyleSheet("""
-            QScrollArea {
-                background-color: rgba(32, 32, 32, 1);
-                border: none;
-            }
-        """)
+        self.scroll_area_2.setStyleSheet(MAIN_WINDOW_STYLE)
         self.cards_layout_2.addWidget(self.scroll_area_2)
         
         # 创建预览页面
@@ -465,44 +335,7 @@ class PhotoManager(QMainWindow):
         self.worker = None
         
         # 设置窗口样式
-        self.setStyleSheet("""
-            QMainWindow, QWidget {
-                background-color: rgba(32, 32, 32, 0.85);
-            }
-            QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {
-                background-color: rgba(32, 32, 32, 0.85);
-                border: none;
-            }
-            QProgressBar {
-                border: none;
-                background-color: rgba(45, 45, 45, 0.85);
-                height: 4px;
-            }
-            QProgressBar::chunk {
-                background-color: rgba(98, 114, 164, 0.9);
-            }
-            QLabel {
-                color: rgba(255, 255, 255, 0.95);
-            }
-            QScrollBar:vertical {
-                background: transparent;
-                width: 8px;
-                margin: 0;
-            }
-            QScrollBar::handle:vertical {
-                background: rgba(128, 128, 128, 0.5);
-                min-height: 30px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: rgba(128, 128, 128, 0.7);
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: none;
-                height: 0;
-            }
-        """)
+        self.setStyleSheet(MAIN_WINDOW_STYLE)
         
         # 添加防抖定时器，减少延迟时间
         self.resize_timer = QTimer()
@@ -571,6 +404,7 @@ class PhotoManager(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("设置")
         dialog.setFixedSize(500, 1000)
+        dialog.setStyleSheet(SETTINGS_DIALOG_STYLE)
         
         # 创建布局
         layout = QVBoxLayout(dialog)
@@ -583,9 +417,9 @@ class PhotoManager(QMainWindow):
             h_line = QFrame()
             h_line.setFrameShape(QFrame.HLine)
             h_line.setFrameShadow(QFrame.Sunken)
-            h_line.setStyleSheet("background-color: #3d3d3d;color: #ffffff;padding: 0;margin: 0;")
+            h_line.setStyleSheet("background-color: #3d3d3d;front_size=24px; color: #ffffff;padding: 0;margin: 0;")
             line_label = QLabel(text)
-            line_label.setStyleSheet("color: #ffffff; border: none; background-color: transparent;padding: 0;margin: 0;")
+            line_label.setStyleSheet("color: #ffffff; border: none; front_size=24px;background-color: transparent;padding: 0;margin: 0;")
             line_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             line_layout.addWidget(line_label)
             line_layout.addWidget(h_line)
@@ -627,8 +461,40 @@ class PhotoManager(QMainWindow):
         db_layout.addWidget(db_input)
         db_layout.addWidget(db_browse)
         register_layout.addLayout(db_layout)
+        # 模型路径
+        model_path_layout = QHBoxLayout()
+        model_path_label = QLabel("模型路径:")
+        model_path_input = QLineEdit()
+        model_path_input.setText(get_config(self.config,'face_recognition','insightface_model_path','D:/project/小程序/model'))
+        model_path_browse = QPushButton("浏览")
+        model_path_browse.clicked.connect(lambda: browse_db())
+        model_path_layout.addWidget(model_path_label)
+        model_path_layout.addWidget(model_path_input)
+        model_path_layout.addWidget(model_path_browse)
+        register_layout.addLayout(model_path_layout)
+        model_provider_layout = QHBoxLayout()
+        model_provider_label = QLabel("模型提供者:")
+        model_provider_input = QComboBox()
+        model_provider_input.setStyleSheet(QComboBox_style)
+        model_provider_input.addItems(["CPU", "CUDA"])
+        model_provider_input.setCurrentText(get_config(self.config,'face_recognition','insightface_model_provider','CPUExecutionProvider'))
+        model_provider_layout.addWidget(model_provider_label)
+        model_provider_layout.addWidget(model_provider_input)
+        #人脸置信度
+        face_confidence_layout = QHBoxLayout()
+        face_confidence_label = QLabel("人脸置信度:")
+        face_confidence_input = QLineEdit()
+        face_confidence_input.setText(str(get_config(self.config,'face_recognition','face_confidence',0.5)))
+        face_confidence_layout.addWidget(face_confidence_label)
+        face_confidence_layout.addWidget(face_confidence_input)
+        register_layout.addLayout(model_provider_layout)
+        register_layout.addLayout(face_confidence_layout)
         layout.addLayout(register_layout)
+        
+        
+
         clean_layout = QVBoxLayout()
+        # 清理人脸库
         add_line(clean_layout,"清理人脸库")
         # 输出路径
         clean_db_layout = QHBoxLayout()
@@ -644,29 +510,7 @@ class PhotoManager(QMainWindow):
         method_layout = QHBoxLayout()
         method_label = QLabel("清理方法:")
         method_input = QComboBox()
-        method_input.setStyleSheet("""
-            QComboBox {
-                background-color: #2d2d2d;
-                color: #cccccc;
-                border: 1px solid #3d3d3d;
-                border-radius: 3px;
-                padding: 5px;
-                min-width: 100px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #000000;
-                color: white;
-                selection-background-color: #3d3d3d;
-                selection-color: #ffffff;
-                border: 1px solid #3d3d3d;
-            }
-            QComboBox:hover {
-                background-color: #3d3d3d;
-            }
-        """)
+        method_input.setStyleSheet(QComboBox_style)
         method_input.addItems(["dbscan", "kmeans", "mean"])
         method_input.setCurrentText(get_config(self.config,'clean_db','method','dbscan'))
         method_layout.addWidget(method_label)
@@ -752,29 +596,7 @@ class PhotoManager(QMainWindow):
         nsfw_providers_layout = QHBoxLayout()
         nsfw_providers_label = QLabel("提供者:")
         nsfw_providers_input = QComboBox()
-        nsfw_providers_input.setStyleSheet("""
-            QComboBox {
-                background-color: #2d2d2d;
-                color: #cccccc;
-                border: 1px solid #3d3d3d;
-                border-radius: 3px;
-                padding: 5px;
-                min-width: 100px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #000000;
-                color: white;
-                selection-background-color: #3d3d3d;
-                selection-color: #ffffff;
-                border: 1px solid #3d3d3d;
-            }
-            QComboBox:hover {
-                background-color: #3d3d3d;
-            }
-        """)
+        nsfw_providers_input.setStyleSheet(QComboBox_style)
         nsfw_providers_input.addItems(["CPU", "CUDA"])
         nsfw_providers_input.setCurrentText(get_config(self.config,'nsfw_classifier','providers','CPUExecutionProvider'))
         nsfw_providers_layout.addWidget(nsfw_providers_label)
@@ -857,6 +679,9 @@ class PhotoManager(QMainWindow):
                     'backup_db': backup_checkbox.isChecked(),
                     'db_path': db_input.text(),
                     'update_db': True,  # 添加update_db属性
+                    'ingest_model_path': model_path_input.text(),
+                    'ingest_model_provider': model_provider_input.currentText(),
+                    'face_confidence': float(face_confidence_input.text()) if face_confidence_input.text() else 0.5
                 }
                 self.config['clean_db'] = {  # 添加清理数据库相关配置
                         'output_path': clean_db_output.text(),
@@ -1154,7 +979,7 @@ class PhotoManager(QMainWindow):
                 pixmap = QPixmap(avatar_path)
                 if not pixmap.isNull():
                     # 使用动态宽度进行缩放
-                    scaled_pixmap = pixmap.scaled(width + 20, width + 20, 
+                    scaled_pixmap = pixmap.scaled(width, width, 
                                              Qt.KeepAspectRatioByExpanding, 
                                              Qt.SmoothTransformation)
                     x = (scaled_pixmap.width() - width) // 2
@@ -1180,7 +1005,7 @@ class PhotoManager(QMainWindow):
         info_label.setStyleSheet("""
             QLabel {
                 color: white;
-                background: transparent;
+                background:transparent;
                 padding: 5px;
                 font-weight: bold;
                 font-size: 14px;
@@ -1195,48 +1020,30 @@ class PhotoManager(QMainWindow):
         # 设置容器样式
         avatar_container.setStyleSheet("""
             QWidget {
-                background-color: white;
-                border-radius: 8px;
+                background: transparent;
+                border: none;
             }
         """)
         
         layout.addWidget(avatar_container)
         
         # 设置卡片整体样式
-        card.setStyleSheet("background: transparent;")
+        card.setStyleSheet("background: transparent; border: none;")
         
         # 添加悬停效果
         def enterEvent(event):
             avatar_container.setStyleSheet("""
                 QWidget {
-                    background-color: #f0f0f0;
-                    border-radius: 8px;
-                }
-            """)
-            info_label.setStyleSheet("""
-                QLabel {
-                    color: white;
-                    background: transparent;
-                    padding: 5px;
-                    font-weight: bold;
-                    font-size: 14px;
+                    background: rgba(255, 255, 255, 0.1);
+                    border: none;
                 }
             """)
         
         def leaveEvent(event):
             avatar_container.setStyleSheet("""
                 QWidget {
-                    background-color: white;
-                    border-radius: 8px;
-                }
-            """)
-            info_label.setStyleSheet("""
-                QLabel {
-                    color: white;
                     background: transparent;
-                    padding: 5px;
-                    font-weight: bold;
-                    font-size: 14px;
+                    border: none;
                 }
             """)
         
@@ -1515,38 +1322,6 @@ class PhotoManager(QMainWindow):
         preview_dialog.installEventFilter(drag_filter)
         # 显示对话框
         preview_dialog.exec_()
-    def refresh_folder(self):
-        """刷新文件夹"""
-        # 禁用按钮，显示加载动画
-        self.refresh_btn.setEnabled(False)
-        self.refresh_btn.setIcon(qta.icon('fa5s.sync', color='white', animation=qta.Spin(self.refresh_btn)))
-        
-        # 使用定时器延迟执行刷新操作
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        self.remove_duplicates_worker = RemoveDuplicatesWorker(self.config['last_folder'],0.9)
-        self.remove_duplicates_worker.finished.connect(self.finish_refresh)
-        self.remove_duplicates_worker.start()
-        # 使用lambda正确传递self参数
-        timer.timeout.connect(lambda: self.finish_refresh())
-        timer.start(100)
-
-    def finish_refresh(self):
-        """完成刷新"""
-        try:
-            self.process_folder(self.config['last_folder'])
-            self.update_person_grid()
-            current_widget = self.stacked_layout.currentWidget()
-            if current_widget != self.cards_page:
-                if hasattr(self, 'title'):
-                    image_paths = self.face_db.get(self.title, [])
-                    if image_paths:
-                        # 显示预览界面
-                        self.show_preview(self.title, image_paths)
-        finally:
-            # 恢复按钮状态
-            self.refresh_btn.setEnabled(True)
-            self.refresh_btn.setIcon(qta.icon('fa5s.sync', color='#c8c8c8'))
     def show_preview(self, person_name, image_paths):
         """显示照片预览"""
         # 保存当前人名，用于刷新
@@ -1571,14 +1346,14 @@ class PhotoManager(QMainWindow):
         # 添加标题
         if person_name is not None:
             title_label = QLabel(person_name)
-            title_label.setStyleSheet("color: white; font-size: 16px;")
+            title_label.setStyleSheet(PAGE_TITLE_STYLE)
             toolbar.addWidget(title_label)
         
         self.preview_layout.addLayout(toolbar)
         
         # 创建网格容器
         grid_widget = QWidget()
-        grid_widget.setStyleSheet("background: #1e1e1e;")  # 使用相同的深色背景
+        grid_widget.setStyleSheet(MAIN_WINDOW_STYLE)  # 使用相同的深色背景
         grid_layout = QGridLayout(grid_widget)
         grid_layout.setSpacing(0)
         grid_layout.setContentsMargins(0, 0, 0, 0)
@@ -1610,28 +1385,10 @@ class PhotoManager(QMainWindow):
             thumb_label.setAlignment(Qt.AlignCenter)
             thumb_label.setText("加载中...")
             
-            # 设置样式
-            container_style = """
-                QWidget {
-                    background: #1e1e1e;  /* 深色背景 */
-                    border: none;
-                    margin: 0;
-                    padding: 0;
-                }
-                QWidget:hover {
-                    background: #2d2d2d;  /* 悬停时稍微亮一点 */
-                }
-            """
+
             thumb_container.setStyleSheet(container_style)
             
-            label_style = """
-                QLabel {
-                    border: none;
-                    margin: 0;
-                    padding: 0;
-                    background: transparent;
-                }
-            """
+
             thumb_label.setStyleSheet(label_style)
             
             # 添加点击事件
@@ -1750,27 +1507,10 @@ class PhotoManager(QMainWindow):
             thumb_label.setText("加载中...")
             
             # 设置样式
-            container_style = """
-                QWidget {
-                    background: #1e1e1e;
-                    border: none;
-                    margin: 0;
-                    padding: 0;
-                }
-                QWidget:hover {
-                    background: #2d2d2d;
-                }
-            """
+            container_style = MAIN_WINDOW_STYLE
             thumb_container.setStyleSheet(container_style)
             
-            label_style = """
-                QLabel {
-                    border: none;
-                    margin: 0;
-                    padding: 0;
-                    background: transparent;
-                }
-            """
+            label_style = PAGE_TITLE_STYLE
             thumb_label.setStyleSheet(label_style)
             
             # 添加点击事件
@@ -1869,18 +1609,18 @@ class PhotoManager(QMainWindow):
         back_btn.clicked.connect(lambda: (
             self.stacked_layout.setCurrentWidget(self.preview_page),
             self.stacked_layout.removeWidget(self.photo_view_page),
-            self.restore_events(),
-            self.refresh_btn.setVisible(True)
+            self.restore_events()
         ))
         
         # 添加照片计数
         count_label = QLabel(f"{current_index + 1} / {len(image_paths)}")
-        count_label.setStyleSheet("color: white;")
+        count_label.setStyleSheet("border:none;color:white;font-size:24px;background-color:transparent;padding:0;margin:0;")
         
         # 将组件添加到工具栏
         toolbar.addWidget(back_btn)
         toolbar.addStretch()
         toolbar.addWidget(count_label)
+        # 让返回按钮和计数标签居中
         toolbar.addStretch()
         
         # 将工具栏容器添加到主布局
@@ -1912,7 +1652,6 @@ class PhotoManager(QMainWindow):
         
         # 将容器设置为滚动区域的widget
         scroll_area.setWidget(container)
-        self.refresh_btn.setVisible(False)
         class DragManager:
             def __init__(self):
                 self.dragging = False
@@ -2376,6 +2115,7 @@ class PhotoManager(QMainWindow):
         
         self.fade_anim.finished.connect(switch_complete)
         self.fade_anim.start()
+
 class NSFWWorker(QThread):
     finished = pyqtSignal(dict)
     def __init__(self, folder,nsfw_classifier):
@@ -2502,6 +2242,7 @@ class PhotoProcessWorker(QThread):
             del results['face_db'][category]
         # 只更新界面显示，不保存到数据库
         self.finished.emit(results)
+
 class ProcessWorker(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(dict)
@@ -2569,14 +2310,15 @@ class ProcessWorker(QThread):
                     self.total_register_person[matched_name] += 1
         self.finished.emit(self.total_register_person)
         self.total_register_person ={}
-if __name__ == "__main__":
+
+if __name__ == '__main__':
+    # 在创建QApplication之前设置高DPI缩放
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
+    
     app = QApplication(sys.argv)
-    app.setAttribute(Qt.AA_DisableHighDpiScaling)
-    app.setAttribute(Qt.AA_UseHighDpiPixmaps)
     window = PhotoManager()
-    # 设置应用图标
-    app_icon = QIcon("../assets/image.ico")
-    window.setWindowIcon(app_icon)
-    QApplication.setWindowIcon(app_icon)
     window.show()
     sys.exit(app.exec_()) 
+
+

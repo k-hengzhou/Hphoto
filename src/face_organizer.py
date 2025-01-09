@@ -1,19 +1,23 @@
+# 人脸识别和组织核心类
+# 功能：将照片整理到指定目录，并创建人脸数据库
+# 输入：照片目录
+# 输出：整理后的照片目录，人脸数据库    
 import os
 import cv2
 import numpy as np
 import insightface
 from PIL import Image
-import pickle
+import msgpack
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, simpledialog
 from tkinter import messagebox
-from tqdm import tqdm  # 在文件开头添加导入
+from tqdm import tqdm
 
 # 人脸识别和组织核心类
 class FaceOrganizer:
-    def __init__(self, model_path=None, faces_db_path='known_faces.pkl', 
-                 threshold=0.5, update_db=True, backup_db=True):
+    def __init__(self, model_path=None, faces_db_path='known_faces.msgpack', 
+                 threshold=0.5, providers=["CPUExecutionProvider"], confidence=0.5, update_db=True, backup_db=True):
         """初始化人脸识别器
         
         Args:
@@ -28,13 +32,13 @@ class FaceOrganizer:
         self.update_db = update_db
         self.backup_db = backup_db
         self.known_faces = self._load_faces_db()
-        
+        self.confidence = confidence
         # 初始化人脸分析器
         try:
             self.face_analyzer = insightface.app.FaceAnalysis(
                 model_name='buffalo_l',
-                model_path=model_path,
-                providers=['CPUExecutionProvider']
+                root=model_path,
+                providers=providers
             )
             self.face_analyzer.prepare(ctx_id=0, det_size=(640, 640))
         except Exception as e:
@@ -44,13 +48,20 @@ class FaceOrganizer:
         """加载人脸数据库
         
         Returns:
-            dict: 人脸数据库字典，key为人名，value为特征向量
+            dict: 人脸数据库。字典，key为人名，value为特征向量
         """
         if os.path.exists(self.faces_db_path):
             try:
                 with open(self.faces_db_path, 'rb') as f:
-                    return pickle.load(f)
+                    # 读取msgpack数据
+                    packed_data = msgpack.load(f)
+                    # 转换numpy数组
+                    db = {}
+                    for name, faces in packed_data.items():
+                        db[name] = [np.array(face, dtype=np.float32) for face in faces]
+                    return db
             except Exception as e:
+                print(f"加载数据库失败: {str(e)}")
                 return {}
         return {}
 
@@ -71,12 +82,15 @@ class FaceOrganizer:
                 for name, faces in self.known_faces.items():
                     db_to_save[name] = []
                     for face in faces:
+                        # 将numpy数组转换为列表以便序列化
                         db_to_save[name].append(
-                            face.astype(np.float32) if not isinstance(face, np.ndarray) else face
+                            face.tolist() if isinstance(face, np.ndarray) else face
                         )
-                pickle.dump(db_to_save, f)
+                # 使用msgpack保存
+                msgpack.dump(db_to_save, f)
                 
         except Exception as e:
+            print(f"保存数据库失败: {str(e)}")
             pass
 
     def detect_faces(self, image_path):
@@ -96,13 +110,13 @@ class FaceOrganizer:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             faces = self.face_analyzer.get(img)
             # 过滤掉检测得分小于0.7的矩形框
-            faces = [face for face in faces if face.det_score > 0.5]
+            faces = [face for face in faces if face.det_score > self.confidence]
             # 过滤掉特征向量长度小于512的矩形框
             faces = [face for face in faces if len(face.embedding) >= 512 ]
             return (faces, img) if faces else (None, img)
             
         except Exception:
-            return None
+            return None,None
 
     def compare_face(self,image_path):
         """比较人脸"""
@@ -112,18 +126,14 @@ class FaceOrganizer:
         faces, img = result
         max_similarity = 0
         matched_name = None
-        print("len(faces):",len(faces)) 
         for face in faces:
             embedding = face.embedding
             for known_name, known_embedding in self.known_faces.items():    
                 if isinstance(known_embedding, list):
-                    print("known_embedding:",len(known_embedding))
                     similarity = max(self._calculate_cosine_similarity(embedding, ke) 
                                    for ke in known_embedding)
                 else:   
-                    print("known_embedding 1:",len(known_embedding))
                     similarity = self._calculate_cosine_similarity(embedding, known_embedding)
-                print("known_name:",known_name,"similarity:",similarity)
                 if similarity > max_similarity:
                     max_similarity = similarity
                     if similarity > self.threshold:
@@ -385,13 +395,10 @@ class FaceOrganizer:
             # 处理文件
             for root, _, files in os.walk(input_dir):
                 for file in files:
-                    print("files num:",len(files)-processed_files)
                     if file.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
                         image_path = os.path.join(root, file)
-                        print("set_description:")
                         # 更新进度条描述
                         pbar.set_description(f"处理: {os.path.basename(image_path)}")
-                        print("process_image:") 
                         # 处理图片
                         if self.process_image(image_path, output_dir, gui_mode):
                             processed_files += 1
@@ -441,9 +448,7 @@ class FaceOrganizer:
     def process_image(self, image_path, output_dir, gui_mode=True):
         """处理单张图片"""
         # 检测人脸
-        print("image_path:",image_path)
         result = self.detect_faces(image_path)
-        print("result:")
         if not result:
             return False
         
@@ -453,30 +458,26 @@ class FaceOrganizer:
         # 创建未识别人脸目录
         unknown_dir = os.path.join(output_dir, "未识别的人脸")
         os.makedirs(unknown_dir, exist_ok=True)
-        print("image_path:",image_path)
+        
         for face in faces:
             # 获取人脸特征
             embedding = face.embedding
-            print("len(embedding):",len(embedding))
             # 查找相似人脸
             name = None
             max_similarity = 0
             
             for known_name, known_embedding in self.known_faces.items():
                 if isinstance(known_embedding, list):
-                    print("known_name:",known_name,"len(known_embedding):",len(known_embedding))
                     similarity = max(self._calculate_cosine_similarity(embedding, ke) 
                                    for ke in known_embedding)
-                    print("known_name:",known_name,"similarity:",similarity)
                 else:
                     similarity = self._calculate_cosine_similarity(embedding, known_embedding)
-                    print("known_name:",known_name,"similarity:",similarity)
                 if similarity > max_similarity:
                     max_similarity = similarity
                     
                     if similarity > self.threshold:
                         name = known_name
-            print("name:",name) 
+                        
             if name is None and gui_mode:
                 # 未找到匹配的人脸，尝试注册新人脸
                 name = self._handle_unknown_face(image_path, embedding)
@@ -494,7 +495,6 @@ class FaceOrganizer:
                         # 直接写入字节数据
                         with open(unknown_path, 'wb') as f:
                             f.write(img_encoded.tobytes())
-                        print(f"已将未识别的人脸保存至: {unknown_path}")
                         processed = True
                     except Exception as e:
                         print(f"保存未识别人脸失败 {unknown_path}: {str(e)}")
@@ -521,7 +521,6 @@ class FaceOrganizer:
                     _, img_encoded = cv2.imencode(ext, img_bgr)
                     with open(output_path, 'wb') as f:
                         f.write(img_encoded.tobytes())
-                    print(f"已保存图片到 {base_name} 文件夹: {output_path}")
                     processed = True
                 except Exception as e:
                     print(f"保存图片失败 {output_path}: {str(e)}")

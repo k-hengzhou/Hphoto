@@ -4,10 +4,11 @@ from PyQt5.QtGui import QIcon
 import sys
 from PyQt5.QtCore import Qt
 
-def main():
+def main():    
+    QApplication.setAttribute(Qt.AA_DisableHighDpiScaling)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication(sys.argv)
-    app.setAttribute(Qt.AA_DisableHighDpiScaling)
-    app.setAttribute(Qt.AA_UseHighDpiPixmaps)
+
     window = PhotoManager()
     # 设置应用图标
     app_icon = QIcon("assets/image.ico")

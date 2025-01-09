@@ -10,8 +10,11 @@
     "face_recognition": {
         "threshold": 0.5,
         "backup_db": false,
-        "db_path": "D:/project/小程序/pkl/known_faces_op.pkl",
-        "update_db": true
+        "db_path": "D:/project/Hphoto/info/celebrity.msgpack",
+        "update_db": true,
+        "insightface_model_path": "D:/project/Hphoto/model",
+        "insightface_model_provider": "CPU",
+        "face_confidence": 0.5
     },
     "clean_db": {
         "output_path": "D:/project/小程序/known_faces.pkl",

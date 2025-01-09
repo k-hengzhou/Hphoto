@@ -17,6 +17,7 @@ a = Analysis(
     datas=[
         ('assets/*.png', 'icon'),
         ('config/*.json', 'config'),
+        ('model', 'model'),
     ],
     hiddenimports=[
         'insightface',

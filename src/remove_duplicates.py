@@ -10,6 +10,12 @@ from skimage.metrics import structural_similarity as ssim
 import cv2
 
 class DuplicateRemover:
+    """
+    重复图片查找和删除工具
+    输入：照片目录
+    输出：重复图片列表
+    功能：将照片目录下的所有图片进行相似度计算，并删除重复图片
+    """
     def __init__(self, similarity_threshold=0.9):
         self.file_hashes = defaultdict(list)
         self.similar_pairs = []

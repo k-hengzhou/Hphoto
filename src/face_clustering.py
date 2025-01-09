@@ -1,11 +1,18 @@
+# 人脸聚类
+# 输入：人脸向量
+# 输出：人脸聚类结果
+# 功能：将人脸向量进行聚类，并保存到人脸聚类结果中
+# 人脸聚类结果用于人脸识别，将人脸识别结果与人脸聚类结果进行匹配，找到人脸
 import os
 import cv2
 import numpy as np
 import insightface
+import msgpack
 from pathlib import Path
 from sklearn.cluster import DBSCAN
 from tqdm import tqdm
 import psutil
+
 def calculate_distance_matrix(embeddings):
     """计算特征向量之间的距离矩阵，确保所有值非负"""
     n = len(embeddings)
@@ -25,6 +32,32 @@ def calculate_distance_matrix(embeddings):
             distance_matrix[i, j] = distance
     
     return distance_matrix
+
+def save_clusters(clusters, output_path):
+    """保存聚类结果到文件"""
+    try:
+        # 将numpy数组转换为列表
+        clusters_to_save = {}
+        for name, paths in clusters.items():
+            clusters_to_save[name] = [str(path) for path in paths]
+        
+        # 使用msgpack保存
+        with open(output_path, 'wb') as f:
+            msgpack.dump(clusters_to_save, f)
+        print(f"聚类结果已保存到: {output_path}")
+    except Exception as e:
+        print(f"保存聚类结果失败: {str(e)}")
+
+def load_clusters(input_path):
+    """从文件加载聚类结果"""
+    try:
+        with open(input_path, 'rb') as f:
+            clusters = msgpack.load(f)
+            # 将路径字符串转换为Path对象
+            return {name: [Path(p) for p in paths] for name, paths in clusters.items()}
+    except Exception as e:
+        print(f"加载聚类结果失败: {str(e)}")
+        return {}
 
 class FaceClusterer:
     def __init__(self, min_samples=3, eps=0.3):
@@ -75,11 +108,10 @@ class FaceClusterer:
         except Exception as e:
             return None
 
-    def get_clusters(self, input_dir):
-        """获取聚类结果"""
+    def get_clusters(self, input_dir, output_path=None):
+        """获取聚类结果，可选保存到文件"""
         # 收集所有图片文件
         image_files = []
-        print("input_dir",input_dir)
         for ext in ('*.jpg', '*.jpeg', '*.png'):
             image_files.extend(Path(input_dir).rglob(ext))
         
@@ -100,7 +132,7 @@ class FaceClusterer:
                 for embedding, path in features:
                     all_features.append(embedding)
                     all_paths.append(path)
-        print("all_features",len(all_features))
+        
         if not all_features:
             return {}
         
@@ -125,11 +157,15 @@ class FaceClusterer:
             indices = np.where(labels == label)[0]
     
             # 只处理样本数大于3的类别
-
             if len(indices) >= self.min_samples:
                 key = f'未知人物_{j}'
                 result[key] = [all_paths[i] for i in indices]
                 j+=1
+        
+        # 如果指定了输出路径，保存结果
+        if output_path:
+            save_clusters(result, output_path)
+            
         return result
 
 def main():
@@ -142,8 +178,12 @@ def main():
         print("文件夹不存在!")
         return
     
+    # 获取输出文件路径（可选）
+    output_path = input("请输入保存结果的文件路径（直接回车跳过）: ").strip()
+    output_path = output_path if output_path else None
+    
     # 获取聚类结果
-    clusters = clusterer.get_clusters(input_dir)
+    clusters = clusterer.get_clusters(input_dir, output_path)
     
     if clusters:
         print("\n聚类结果:")
