@@ -59,20 +59,29 @@ class NSFWClassifier:
                 print("result is None")
                 return False, 0.0,""
             # print("len(result):",len(result))  
+            score_total = 0
             score = 0
             class_name = ""
+            # 找出相同class score最大的
+            class_max_score = {}
             for re in result:
                 if re['class'] in default_nsfw_class:
-                    # print(re['class'])
-                    if score < re['score']:
-                        score = re['score']
-                        class_name = re['class']
-            # print("score:",score)
+                    if re['class'] not in class_max_score:
+                        class_max_score[re['class']] = re['score']
+                    else:
+                        if class_max_score[re['class']] < re['score']:
+                            class_max_score[re['class']] = re['score']
+            for cls,cls_score in class_max_score.items():   
+                #求平方
+                score_total = float(np.exp((cls_score-self.unsafe_threshold))*cls_score+score_total)
+                if cls_score > score:
+                    score = cls_score
+                    class_name = cls
+                # score_total = float(np.exp(score_total))
             # 获取分类结果
             # score = result[image_path]['unsafe']
-            is_nsfw = score >= self.unsafe_threshold
-            print("is_nsfw:",is_nsfw)
-            return is_nsfw, score,class_name
+            is_nsfw = score_total >= self.unsafe_threshold
+            return is_nsfw, score_total,class_name
             
         except Exception:
             return False, 0.0,class_name

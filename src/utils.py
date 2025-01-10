@@ -9,6 +9,7 @@ from PyQt5.QtGui import QPixmap, QPainter, QImage, QImageReader
 from pathlib import Path
 import shutil
 import cv2
+import time
 def normalize_path(path):
     """统一处理文件路径
     
@@ -111,8 +112,12 @@ def copy_photo(person_name,image_path,last_folder):
             if not os.path.exists(person_dir):
                 os.makedirs(person_dir, exist_ok=True)
                 # 复制照片
+            # 获取时间戳
+            timestamp = int(time.time())
+            #时间戳格式化,年月日时分秒，年份只取后两位，月份和日期只取一位，时分秒只取两位
+            timestamp = time.strftime("%y%m%d%H%M%", time.localtime(timestamp))
 
-            dest_path = os.path.join(person_dir, os.path.basename(image_path))
+            dest_path = os.path.join(person_dir, f"{person_name}_{timestamp}.jpg")
             shutil.copy(image_path, dest_path)
     except Exception as e:
         print(f"复制照片失败: {e}")

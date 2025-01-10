@@ -107,7 +107,25 @@ class FaceClusterer:
             
         except Exception as e:
             return None
-
+    def cluster_faces(self, embeddings,all_paths):
+        """对特征向量进行聚类"""
+        X = np.array(embeddings)
+        distance = calculate_distance_matrix(X)
+        clustering = DBSCAN(eps=self.eps, min_samples=self.min_samples, metric='precomputed')
+        labels = clustering.fit(distance)
+        labels = clustering.labels_
+        result = {}
+        unique_labels = set(labels)
+        j=0
+        for label in unique_labels:
+            if label == -1:
+                continue
+            indices = np.where(labels == label)[0]
+            if len(indices) >= self.min_samples:
+                key = f'未知人物_{j}'
+                result[key] = [all_paths[i] for i in indices]
+                j+=1
+        return result
     def get_clusters(self, input_dir, output_path=None):
         """获取聚类结果，可选保存到文件"""
         # 收集所有图片文件
@@ -141,9 +159,7 @@ class FaceClusterer:
         
         # 使用DBSCAN进行聚类
         distance = calculate_distance_matrix(X)
-        clustering = DBSCAN(eps=self.eps, min_samples=self.min_samples, metric='precomputed')
-        labels = clustering.fit(distance)
-        labels = clustering.labels_
+        labels = self.cluster_faces(all_features)
         # 将结果组织成字典格式
         result = {}
         # 获取唯一标签

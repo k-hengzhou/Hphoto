@@ -134,31 +134,32 @@ SWITCH_BUTTON_STYLE = """
 
 # 消息框样式
 MESSAGE_BOX_STYLE = """
-    QMessageBox {
-        background-color: rgba(32, 32, 32, 0.85);
-        border: none;
-        border-radius: 4px;
-        padding: 10px;
-        font-family: "Segoe UI", Arial;
-        font-size: 24px;    
-        color: rgba(255, 255, 255, 0.95);
-    }
-    QMessageBox QLabel {
-        color: rgba(255, 255, 255, 0.95);
-    }
-    QMessageBox QPushButton {
-        background-color: rgba(98, 114, 164, 0.9);
-        color: rgba(255, 255, 255, 0.95);
-        border: none;
-        border-radius: 4px;
-        padding: 10px 10px;
-        font-family: "Segoe UI", Arial;
-        font-size: 14px;
-    }
-    QMessageBox QPushButton:hover {
-        background-color: rgba(128, 128, 128, 0.3);
-    }
-"""
+            QMessageBox {
+                background-color: rgba(32, 32, 32, 0.85);
+                border: none;
+                border-radius: 4px;
+                padding: 10px;
+                font-family: "Segoe UI", Arial;
+                font-size: 24px;    
+                color: rgba(255, 255, 255, 0.95);
+            }
+            QMessageBox QLabel {
+                color: rgba(255, 255, 255, 0.95);
+            }
+            QMessageBox QPushButton {
+                background-color: rgba(98, 114, 164, 0.9);
+                color: rgba(255, 255, 255, 0.95);
+                border: none;
+                border-radius: 4px;
+                padding: 10px 10px;
+                font-family: "Segoe UI", Arial;
+                font-size: 14px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.3);
+            
+            }   
+        """
 
 # 工具提示样式
 TOOLTIP_STYLE = """

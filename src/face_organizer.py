@@ -17,7 +17,8 @@ from tqdm import tqdm
 # 人脸识别和组织核心类
 class FaceOrganizer:
     def __init__(self, model_path=None, faces_db_path='known_faces.msgpack', 
-                 threshold=0.5, providers=["CPUExecutionProvider"], confidence=0.5, update_db=True, backup_db=True):
+                 threshold=0.5, confidence=0.5, update_db=True, backup_db=True,
+                 providers=['CPUExecutionProvider']):
         """初始化人脸识别器
         
         Args:
@@ -105,7 +106,7 @@ class FaceOrganizer:
         try:
             img = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
             if img is None:
-                return None
+                return None,None,None,None
                 
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             faces = self.face_analyzer.get(img)
@@ -122,10 +123,13 @@ class FaceOrganizer:
         """比较人脸"""
         result = self.detect_faces(image_path)
         if result is None:
-            return False
+            return None,None,None,None
         faces, img = result
         max_similarity = 0
         matched_name = None
+        matched_embedding = None
+        age = None
+        gender = None
         for face in faces:
             embedding = face.embedding
             for known_name, known_embedding in self.known_faces.items():    
@@ -138,7 +142,10 @@ class FaceOrganizer:
                     max_similarity = similarity
                     if similarity > self.threshold:
                         matched_name = known_name
-        return matched_name
+                        matched_embedding = embedding
+                        age = face.age
+                        gender = face.gender
+        return matched_name,matched_embedding,age,gender
     def register_face(self, face_embedding, person_name):
         """注册新人脸"""
         if person_name and person_name.strip():
@@ -155,21 +162,7 @@ class FaceOrganizer:
             print(f"已将此人脸注册为: {person_name}")
             return person_name
         return None
-    # def register_face(self,image_path, person_name):
-    #     """注册新人脸"""
-    #     if person_name and person_name.strip():
-    #         face_embedding = self.detect_faces([image_path])
-    #         if face_embedding is None:
-    #             print(f"无法检测到人脸: {image_path}")
-    #             return None
-    #         if isinstance(self.known_faces[person_name], list):
-    #             self.known_faces[person_name].append(face_embedding)
-    #         else:
-    #             self.known_faces[person_name] = [self.known_faces[person_name], face_embedding]
-    #         self._save_faces_db()
-    #         print(f"已将此人脸注册为: {person_name}")
-    #         return person_name
-    #     return None
+
     def get_face_db(self):
         return self.known_faces
     def _handle_unknown_face(self, image_path, face_embedding):

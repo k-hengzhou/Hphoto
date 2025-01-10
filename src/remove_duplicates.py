@@ -35,6 +35,16 @@ class DuplicateRemover:
             return hasher.hexdigest()
         except Exception:
             return None
+    def compare_images(self, img1_path, img2_path):
+        hash1 = self.calculate_hash(img1_path)
+        hash2 = self.calculate_hash(img2_path)
+        if hash1 is not None and hash2 is not None:
+            if hash1 == hash2:
+                return True
+        similarity = self.calculate_image_similarity(img1_path, img2_path)
+        if similarity >= self.similarity_threshold:
+            return True
+        return False
     
     def calculate_image_similarity(self, img1_path, img2_path, size=(224, 224)):
         try:

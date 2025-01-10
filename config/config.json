@@ -1,5 +1,5 @@
 {
-    "last_folder": "D:/project/Hphoto/lady/Marupi",
+    "last_photo_db": "D:/project/Hphoto/info/lady.msgpack",
     "window_state": {
         "width": 1500,
         "height": 900,
@@ -11,9 +11,9 @@
         "threshold": 0.5,
         "backup_db": false,
         "db_path": "D:/project/Hphoto/info/celebrity.msgpack",
-        "update_db": true,
+        "update_db": false,
         "insightface_model_path": "D:/project/Hphoto/model",
-        "insightface_model_provider": "CPU",
+        "insightface_model_provider": "CPUExecutionProvider",
         "face_confidence": 0.5
     },
     "clean_db": {
@@ -24,7 +24,7 @@
         "backup": false
     },
     "face_clustering": {
-        "min_samples": 5,
+        "min_samples": 3,
         "eps": 0.3
     },
     "nsfw_classifier": {
@@ -42,5 +42,9 @@
             "FEMALE_BREAST_COVERED",
             "BUTTOCKS_COVERED"
         ]
-    }
+    },
+    "photo_db_path": [
+        "",
+        ""
+    ]
 }
