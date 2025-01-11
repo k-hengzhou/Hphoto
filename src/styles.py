@@ -100,7 +100,7 @@ PAGE_TITLE_STYLE = """
 # 切换按钮样式
 SWITCH_BUTTON_STYLE = """
     QPushButton {
-        background-color: rgba(45, 45, 45, 0.4);
+        background-color: rgba(32, 32, 32, 0.85);
         border: none;
         font-size: 24px;
     }

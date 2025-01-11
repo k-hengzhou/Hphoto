@@ -123,7 +123,7 @@ class FaceOrganizer:
         """比较人脸"""
         result = self.detect_faces(image_path)
         if result is None:
-            return None,None,None,None
+            return None,np.array([]),None,None
         faces, img = result
         max_similarity = 0
         matched_name = None

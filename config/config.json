@@ -11,9 +11,9 @@
         "threshold": 0.5,
         "backup_db": false,
         "db_path": "D:/project/Hphoto/info/celebrity.msgpack",
-        "update_db": false,
-        "insightface_model_path": "D:/project/Hphoto/model",
-        "insightface_model_provider": "CPUExecutionProvider",
+        "update_db": true,
+        "ingest_model_path": "model",
+        "ingest_model_provider": "CPUExecutionProvider",
         "face_confidence": 0.5
     },
     "clean_db": {
@@ -30,7 +30,7 @@
     "nsfw_classifier": {
         "unsafe_threshold": 0.6,
         "model_path": "D:/project/Hphoto/model/640m.onnx",
-        "providers": "CPU",
+        "providers": "CPUExecutionProvider",
         "nsfw_class": [
             "FEMALE_GENITALIA_COVERED",
             "BUTTOCKS_EXPOSED",

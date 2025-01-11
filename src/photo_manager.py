@@ -27,16 +27,57 @@ from .styles import *
 import msgpack
 import numpy as np
 from collections import Counter
+import random
+from PyQt5.QtCore import QEventLoop
 # 在创建QApplication之前设置高DPI缩放
 QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
 QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
-
+person_info_base ={
+            "name":None,
+            "photo_path":None,
+            "embedding":np.array([]),
+            "gender":0,
+            "age":0,
+            "add_time":0,
+            "open_time":0,
+            "nsfw_score":0,
+            "nsfw_class":"",
+            "duplicate_index":None,
+            "star":False,
+            "tag":[],
+            "love_score":0,
+            "is_nsfw":None,
+            "face_cluster_index":None
+        }
 class VSCodeTooltip(QWidget):
     def __init__(self, title, shortcut=None, description=None, parent=None):
         super().__init__(parent, Qt.ToolTip | Qt.FramelessWindowHint)
         self.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TranslucentBackground)
+                # 创建布局
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(2)
+        
+        # 添加标题
+        title_label = QLabel(title)
+        title_label.setStyleSheet(label_style)
+        title_label.setStyleSheet("font-size: 24px;background-color: #252526;")
+        layout.addWidget(title_label)
+        
+        # 如果有快捷键，添加快捷键
+        if shortcut:
+            shortcut_label = QLabel(shortcut)
+            shortcut_label.setStyleSheet("color: #888888;")
+            layout.addWidget(shortcut_label)
+            
+        # 如果有描述，添加描述
+        if description:
+            desc_label = QLabel(description)
+            desc_label.setStyleSheet("color: #888888;")
+            layout.addWidget(desc_label)
+            
         self.setStyleSheet(TOOLTIP_STYLE)
 
 class QMessageBox(QMessageBox):
@@ -78,10 +119,12 @@ class QMessageBox(QMessageBox):
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         return msg.exec_()
 class KeyButton(QPushButton):
-    def __init__(self, text, tooltip=None, parent=None):
-        super().__init__(text, parent)
+    def __init__(self, text=None, tooltip=None, parent=None):
+        super().__init__(parent)
         self.setFixedSize(45, 45)
         self.tooltip_widget = None
+        if text:
+            self.setText(text)
         if tooltip:
             self.tooltip_widget = VSCodeTooltip(tooltip)
             self.tooltip_widget.hide()
@@ -137,9 +180,10 @@ class PhotoManager(QMainWindow):
         self.config_file = "config/config.json"
         self.load_config()
         self.style_name =[["全部","收藏","未识别","无人脸"],["重复文件"]]
-        
-        self.style_name.append(default_nsfw_class)
+        self.person_info_base =person_info_base.copy()
         self.style_name.append(["未知人物"])
+        self.style_name.append(default_nsfw_class)
+        # self.style_name.append(["未知人物"])
         # 移除默认的窗口标题栏
         self.setWindowFlags(Qt.FramelessWindowHint)
         
@@ -301,6 +345,10 @@ class PhotoManager(QMainWindow):
         self.main_layout.addWidget(content_widget)
         
         self.photo_db = []
+        self.is_first_page = True
+        self.is_open_nsfw = False
+        self.is_select_page = False
+        self.selected_images = []
         # 初始化人脸识别器
         try:
             # 获取配置中的人脸库路径
@@ -454,12 +502,18 @@ class PhotoManager(QMainWindow):
         with open(self.photo_db_path, 'wb') as f:
             msgpack.pack(self.photo_db, f)
     def handle_face_clustering(self,clusters):
-        # print("开始聚类")
-        # print("clusters",clusters)
-        self.face_db.update(clusters)
+        face_cluster_list =[item["face_cluster_index"] for item in self.photo_db if "face_cluster_index" in item and item["face_cluster_index"] is not None]
+        for i in range(len(clusters)):
+            j=0
+            while j in face_cluster_list:
+                j+=1
+            for item in clusters[i]:
+                photo_db_index = self.get_image_path_index(self.photo_db,item)
+                self.photo_db[photo_db_index]['face_cluster_index'] = j
+            face_cluster_list.append(j)
+        # self.face_db.update(clusters)
         person_name = list(self.face_db.keys())
-        # print("person_name",person_name)
-        # print("face_db",self.face_db)
+        # print(person_name)
     def handle_duplicates(self,photo_db):
         for i in range(len(photo_db)):
             if 'duplicate_index' not in photo_db[i] :
@@ -493,6 +547,85 @@ class PhotoManager(QMainWindow):
             self.photo_db[i]["nsfw_class"] = results[i]["nsfw_class"]
             self.photo_db[i]["is_nsfw"] = results[i]["is_nsfw"]
         # self.process_photo_db()
+    def setting_person_info(self,image_path):
+        """设置人物信息"""
+        image_index=self.get_image_path_index(self.photo_db,image_path)
+        gender_list =["男","女"]
+        dialog = QDialog(self)
+        dialog.setWindowTitle("设置人物信息")
+        dialog.setFixedSize(500, 400)
+        dialog.setStyleSheet(SETTINGS_DIALOG_STYLE)
+        layout = QVBoxLayout(dialog)
+        layout.setAlignment(Qt.AlignTop)
+        name_layout = QHBoxLayout()
+        name_label = QLabel("姓名:")
+        name_input = QLineEdit()
+        name_input.setText(self.photo_db[image_index]["name"])
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(name_input)
+        layout.addLayout(name_layout)
+        age_layout = QHBoxLayout()
+        age_label = QLabel("年龄:")
+        age_input = QLineEdit()
+        age_input.setText(str(self.photo_db[image_index]["age"]))
+        age_layout.addWidget(age_label)
+        age_layout.addWidget(age_input)
+        layout.addLayout(age_layout)
+        gender_layout = QHBoxLayout()
+        gender_label = QLabel("性别:")
+        gender_input = QComboBox()
+        gender_input.setStyleSheet(QComboBox_style)
+        gender_input.addItems(gender_list)
+        gender_input.setCurrentText(gender_list[self.photo_db[image_index]["gender"]])
+        gender_layout.addWidget(gender_label)
+        gender_layout.addWidget(gender_input)
+        layout.addLayout(gender_layout)
+        is_nsfw_layout = QHBoxLayout()
+        is_nsfw_label = QLabel("是否NSFW:")
+        is_nsfw_input = QCheckBox()
+        is_nsfw_input.setChecked(self.photo_db[image_index]["is_nsfw"])
+        nsfw_score_label = QLabel("NSFW分数:")
+        nsfw_score_input = QLineEdit()
+        nsfw_score_input.setText(f"{self.photo_db[image_index]['nsfw_score']:.2f}")
+        nsfw_score_input.setFixedSize(100, 40)
+        is_nsfw_layout.addWidget(is_nsfw_label)
+        is_nsfw_layout.addWidget(is_nsfw_input)
+        is_nsfw_layout.addStretch()
+        is_nsfw_layout.addWidget(nsfw_score_label)
+        is_nsfw_layout.addWidget(nsfw_score_input)
+        layout.addLayout(is_nsfw_layout)
+        score_layout = QHBoxLayout()
+        score_label = QLabel("得分:")
+        score_input = QLineEdit()
+        score_input.setText(f"{self.photo_db[image_index]['love_score']:.2f}")
+        # score_input.setFixedSize(100, 40)
+        star_combo = QCheckBox("收藏")
+        star_combo.setChecked(self.photo_db[image_index]["star"])
+        score_layout.addWidget(score_label)
+        score_layout.addWidget(score_input)
+        score_layout.addWidget(star_combo)
+        layout.addLayout(score_layout)
+        # 保存按钮
+        save_btn_layout = QHBoxLayout()
+        save_btn = QPushButton("保存")
+        save_btn.clicked.connect(lambda: save_person_info())
+        save_btn_layout.addWidget(save_btn)
+        def save_person_info():
+            person_info =self.photo_db[image_index]
+            person_info["name"] = name_input.text()
+            person_info["age"] = int(age_input.text())
+            person_info["gender"] = gender_list.index(gender_input.currentText())
+            person_info["is_nsfw"] = is_nsfw_input.isChecked()
+            person_info["star"] = star_combo.isChecked()
+            person_info["love_score"] = float(score_input.text())
+            dialog.close()
+        # 取消按钮
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(dialog.close)
+        save_btn_layout.addWidget(cancel_btn)
+        layout.addLayout(save_btn_layout)
+        dialog.exec_()
+    
     def setting(self):
         """设置对话框"""
         dialog = QDialog(self)
@@ -559,7 +692,7 @@ class PhotoManager(QMainWindow):
         model_path_layout = QHBoxLayout()
         model_path_label = QLabel("模型路径:")
         model_path_input = QLineEdit()
-        model_path_input.setText(get_config(self.config,'face_recognition','insightface_model_path','D:/project/小程序/model'))
+        model_path_input.setText(get_config(self.config,'face_recognition','insightface_model_path','model'))
         model_path_browse = QPushButton("浏览")
         model_path_browse.clicked.connect(lambda: browse_db())
         model_path_layout.addWidget(model_path_label)
@@ -570,7 +703,7 @@ class PhotoManager(QMainWindow):
         model_provider_label = QLabel("模型提供者:")
         model_provider_input = QComboBox()
         model_provider_input.setStyleSheet(QComboBox_style)
-        model_provider_input.addItems(["CPU", "CUDA"])
+        model_provider_input.addItems(["CPUExecutionProvider", "CUDAExecutionProvider"])
         model_provider_input.setCurrentText(get_config(self.config,'face_recognition','insightface_model_provider','CPUExecutionProvider'))
         model_provider_layout.addWidget(model_provider_label)
         model_provider_layout.addWidget(model_provider_input)
@@ -636,16 +769,16 @@ class PhotoManager(QMainWindow):
         clean_backup_layout.setAlignment(Qt.AlignLeft)
         clean_layout.addLayout(clean_backup_layout)
 
-        # clean_btn = QPushButton("清理")
-        # clean_btn.setStyleSheet("background-color: #2d2d2d;color: #cccccc;border: none;padding: 8px 16px;border-radius: 4px;")
+        clean_btn = QPushButton("清理")
+        clean_btn.setStyleSheet("background-color: #2d2d2d;color: #cccccc;border: none;padding: 8px 16px;border-radius: 4px;")
         # clean_btn.setFixedSize(100, 30)
-        # clean_btn.clicked.connect(lambda: self.clean_face_db(db_input.text(),
-                                                            # clean_db_output.text(),
-                                                            # method_input.currentText(),
-                                                            # eps_input.text(),
-                                                            # min_samples_input.text(),
-                                                            # clean_backup_checkbox.isChecked()))
-        # clean_layout.addWidget(clean_btn)
+        clean_btn.clicked.connect(lambda: self.clean_face_db(db_input.text(),
+                                                            clean_db_output.text(),
+                                                            method_input.currentText(),
+                                                            eps_input.text(),
+                                                            min_samples_input.text(),
+                                                            clean_backup_checkbox.isChecked()))
+        clean_layout.addWidget(clean_btn)
         layout.addLayout(clean_layout)
 
         # 添加人脸聚类
@@ -691,16 +824,16 @@ class PhotoManager(QMainWindow):
         nsfw_providers_label = QLabel("提供者:")
         nsfw_providers_input = QComboBox()
         nsfw_providers_input.setStyleSheet(QComboBox_style)
-        nsfw_providers_input.addItems(["CPU", "CUDA"])
+        nsfw_providers_input.addItems(["CPUExecutionProvider", "CUDAExecutionProvider"])
         nsfw_providers_input.setCurrentText(get_config(self.config,'nsfw_classifier','providers','CPUExecutionProvider'))
         nsfw_providers_layout.addWidget(nsfw_providers_label)
         nsfw_providers_layout.addWidget(nsfw_providers_input)
         add_nsfw_layout.addLayout(nsfw_providers_layout)
         add_nsfw_layout.addLayout(nsfw_model_path_layout)
-        nsfw_button = QPushButton("NSFW")
-        nsfw_button.clicked.connect(lambda: self.nsfw_classify())
-        self.unsafe_threshold = nsfw_threshold_input.text()
-        add_nsfw_layout.addWidget(nsfw_button)
+        # nsfw_button = QPushButton("NSFW")
+        # nsfw_button.clicked.connect(lambda: self.nsfw_classify())
+        # self.unsafe_threshold = nsfw_threshold_input.text()
+        # add_nsfw_layout.addWidget(nsfw_button)
 
 
         layout.addLayout(add_face_clustering_layout)
@@ -794,11 +927,29 @@ class PhotoManager(QMainWindow):
                     self.config['nsfw_classifier']['nsfw_class'] = default_nsfw_class
                 # 保存配置
                 self.save_config()
-                
+                self.face_organizer = FaceOrganizer(
+                    threshold=threshold,
+                    backup_db=backup_checkbox.isChecked(),
+                    faces_db_path=db_input.text(),
+                    model_path=normalize_path(model_path_input.text()),
+                    # ingest_model_provider=model_provider_input.currentText(),
+                    confidence=float(face_confidence_input.text()) if face_confidence_input.text() else 0.5,
+                    update_db=True,
+                    providers=[model_provider_input.currentText()]
+                )
+                self.nsfw_classifier = NSFWClassifier(
+                    model_path=normalize_path(nsfw_model_path_input.text()),
+                    providers=[nsfw_providers_input.currentText()],
+                    unsafe_threshold=float(nsfw_threshold_input.text()) if nsfw_threshold_input.text() else 0.6
+                )
+                self.unsafe_threshold = float(nsfw_threshold_input.text()) if nsfw_threshold_input.text() else 0.6
+                min_samples = int(face_clustering_min_samples_input.text()) if face_clustering_min_samples_input.text() else 2
+                eps = float(face_clustering_eps_input.text()) if face_clustering_eps_input.text() else 0.3
+                self.add_face_clustering(min_samples,eps)
                 # 更新人脸识别器设置
-                self.face_organizer.threshold = threshold
-                self.face_organizer.backup_db = backup_checkbox.isChecked()
-                self.face_organizer.faces_db_path = db_input.text()
+                # self.face_organizer.threshold = threshold
+                # self.face_organizer.backup_db = backup_checkbox.isChecked()
+                # self.face_organizer.faces_db_path = db_input.text()
                 
                 QMessageBox.information(dialog, "成功", "设置已保存")
                 dialog.accept()
@@ -846,9 +997,9 @@ class PhotoManager(QMainWindow):
         self.process_worker.start()
         
         # 禁用相关按钮
-        self.open_btn.setEnabled(False)
-        self.folder_btn.setEnabled(False)
-        self.register_btn.setEnabled(False)
+        # self.open_btn.setEnabled(False)
+        # self.folder_btn.setEnabled(False)
+        # self.register_btn.setEnabled(False)
 
     def add_file(self):
         """添加文件"""
@@ -857,7 +1008,7 @@ class PhotoManager(QMainWindow):
             "选择文件",
             "",
             "图片文件 (*.jpg *.jpeg *.png)")
-        print("file_path",file_path)
+        
         if file_path == "":
             print("取消添加文件")
             return
@@ -885,9 +1036,9 @@ class PhotoManager(QMainWindow):
         self.process_worker.start()
         
         # 禁用相关按钮
-        self.open_btn.setEnabled(False)
-        self.folder_btn.setEnabled(False)
-        self.register_btn.setEnabled(False)
+        # self.open_btn.setEnabled(False)
+        # self.folder_btn.setEnabled(False)
+        # self.register_btn.setEnabled(False)
 
     def on_process_complete(self,total_register_person,total_register_person_info):
         """处理完成后的回调"""
@@ -906,8 +1057,7 @@ class PhotoManager(QMainWindow):
                 else:
                     total_register_person[item["name"]] -= 1
         
-        # self.photo_db = list(set(self.photo_db))
-        # 刷新界面
+       
         self.process_photo_db()
         
         # 显示完成消息,在一定时间后自动关闭
@@ -962,7 +1112,6 @@ class PhotoManager(QMainWindow):
         """更新人物网格"""
         # 计算布局信息
         person_name = list(self.face_db.keys())
-        print("person_name",person_name)
         is_first_page = (self.stacked_layout.currentWidget() == self.cards_page)
         if is_first_page:
             layout_info = self.calculate_layout()
@@ -979,12 +1128,10 @@ class PhotoManager(QMainWindow):
         # 预先筛选需要显示的人物
         if is_first_page:
             people_to_show = []
-            # print("self.style_name",self.style_name)
             for person_name, photos in self.face_db.items():
                 if not photos:
                     continue
-                flat_list = [item for sublist in self.style_name for item in sublist]
-                if person_name not in flat_list and person_name.split("_")[0] not in flat_list:
+                if self.is_person_name(person_name) :
                     people_to_show.append((person_name, len(photos)))
             people_to_show.sort(key=lambda x: x[1], reverse=True)
             row = col = 0
@@ -1006,9 +1153,11 @@ class PhotoManager(QMainWindow):
                 col = 0
                 row += 1
             row += 1
-            for person_name, _ in self.face_db.items():
-                print("person_name",person_name)
+            person_name_list = list(self.face_db.keys())
+            # print(person_name_list)
+            for person_name in person_name_list:
                 if "未知人物" in person_name:
+                    print(person_name)
                     person_card = self.create_person_card(person_name, layout_info['card_width'], is_other=True)
                     grid_layout.addWidget(person_card, row, col)
                     col += 1
@@ -1158,7 +1307,7 @@ class PhotoManager(QMainWindow):
                 image_paths = self.face_db.get(person_name, [])
                 if image_paths:
                     # 显示预览界面
-                    self.show_preview(person_name, image_paths)
+                    self.show_preview(person_name=person_name, image_paths=image_paths)
         
         card.mouseReleaseEvent = mouseReleaseEvent
         
@@ -1178,29 +1327,36 @@ class PhotoManager(QMainWindow):
             
             # 处理文件夹
             self.process_photo_db()
-
-    def process_photo_db(self):
-        """打开照片数据库"""
-        if self.photo_db is None:
-            return
-
-        self.progress_bar.hide()
-        self.progress_bar.setValue(0)
-        
-        self.worker = PhotoProcessWorker(self.photo_db, self.face_organizer)
-        self.worker.progress.connect(self.update_progress)
-        self.worker.finished.connect(self.process_complete)
-        self.worker.start()
-        #阻塞
-        self.worker.wait()
+    def create_thread(self):
+        """创建线程"""
         self.nsfw_classify()
         self.add_face_clustering(self.config['face_clustering']['min_samples'],self.config['face_clustering']['eps'])
         self.duplicate_woker = RemoveDuplicatesWorker(self.photo_db,0.9)
         self.duplicate_woker.finished.connect(self.handle_duplicates)
         self.duplicate_woker.start()
+    def process_photo_db(self):
+        """打开照片数据库"""
+        if self.photo_db is None:
+            return
+        loop = QEventLoop()
+        self.progress_bar.hide()
+        self.progress_bar.setValue(0)
+        self.worker = PhotoProcessWorker(self.photo_db, self.face_organizer)
+        self.worker.progress.connect(self.update_progress)
+        self.worker.finished.connect(self.process_complete)
+        self.worker.finished.connect(loop.quit)
+        self.worker.start()
+        #阻塞
+        loop.exec_()
+        self.create_thread()
+        # 每10分钟执行一次
+        # self.timer = QTimer()
+        # self.timer.timeout.connect(self.create_thread)
+        # self.timer.start(600000)
+        
         self.update_person_grid()
-        self.open_btn.setEnabled(False)
-        self.register_btn.setEnabled(False)
+        # self.open_btn.setEnabled(False)
+        # self.register_btn.setEnabled(False)
 
     def update_progress(self, value):
         """更新进度条"""
@@ -1212,35 +1368,55 @@ class PhotoManager(QMainWindow):
         # self.update_person_grid()
         
         # 重新启用按钮
-        self.open_btn.setEnabled(True)
-        self.register_btn.setEnabled(True)
+        # self.open_btn.setEnabled(True)
+        # self.register_btn.setEnabled(True)
         
         # 隐藏进度条
         self.progress_bar.hide()
-    def delete_photo(self, image_path):
+    def delete_photo(self, image_path,is_delete_local=True):
         """删除照片"""
+        if is_delete_local:
+            tip="确定要删除这些照片吗？"
+        else:
+            tip="确定要移出照片库吗？"
         reply = QMessageBox.question(
             self,
             "确认删除",
-            "确定要删除这张照片吗？"
+            tip
         )
     
         if reply == QMessageBox.Yes:
             try:
                 # 删除文件
-                os.remove(image_path)
-            
-                # 从当前预览列表中移除
-                if image_path in self.current_preview_images:
-                    self.current_preview_images.remove(image_path)
-            
+                if isinstance(image_path,str):
+                    if os.path.exists(image_path):
+                        if is_delete_local:
+                            os.remove(image_path)
+                    # if image_path in self.current_preview_images:
+                    #     self.current_preview_images.remove(image_path)
+                    path_list = [item["photo_path"] for item in self.photo_db]
+                    if normalize_path(image_path) in path_list:
+                        self.photo_db.remove(self.photo_db[path_list.index(image_path)])
+                elif isinstance(image_path,list):
+                    for item in image_path:
+                        if os.path.exists(item):
+                            if is_delete_local:
+                                os.remove(item)
+                            # if item in self.current_preview_images:
+                            #     self.current_preview_images.remove(item)
+                        path_list = [item["photo_path"] for item in self.photo_db]
+                        if normalize_path(item) in path_list:
+                            self.photo_db.remove(self.photo_db[path_list.index(item)])
                 # 更新界面
-                self.show_preview(self.title, self.current_preview_images)
-            
+                self.selected_images=[]
+                self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
                 QMessageBox.information(self, "成功", "照片已删除")
             
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"删除失败: {str(e)}")
+        else:
+            self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
+    
     def register_face(self,image_dir=None):
         """注册新人脸"""
         # 选择图片
@@ -1358,17 +1534,18 @@ class PhotoManager(QMainWindow):
                 if person_name is None:
                     QMessageBox.critical(preview_dialog, "错误", "无法检测到人脸")
                     return
-
-                person_info = {
-                    "name":person_name,
-                    "age":faces[combo_box.currentIndex()].age,
-                    "gender":faces[combo_box.currentIndex()].gender,
-                    "photo_path":normalize_path(image_path),
-                    "embedding":faces[combo_box.currentIndex()].embedding
-                }
+                person_info =self.person_info_base.copy()
+                person_info["name"]=person_name
+                person_info["age"]=faces[combo_box.currentIndex()].age
+                person_info["gender"]=faces[combo_box.currentIndex()].gender
+                person_info["photo_path"]=normalize_path(image_path)
+                person_info["embedding"]=faces[combo_box.currentIndex()].embedding
+                person_info["add_time"]=time.time()
+                person_info["open_time"]=time.time()
                 path_list = [item["photo_path"] for item in self.photo_db]
                 if normalize_path(image_path) not in path_list:
                     self.photo_db.append(person_info)
+                
                 else:
                     # 返回image_path在self.photo_db中的索引
                     index = path_list.index(normalize_path(image_path))
@@ -1376,6 +1553,13 @@ class PhotoManager(QMainWindow):
                     self.photo_db[index]["gender"] = faces[combo_box.currentIndex()].gender
                     self.photo_db[index]["age"] = faces[combo_box.currentIndex()].age
                     self.photo_db[index]["embedding"] = faces[combo_box.currentIndex()].embedding
+                    if "face_cluster_index" in self.photo_db[index]:
+                        face_cluster_index = self.photo_db[index]["face_cluster_index"]
+                        self.photo_db[index]["face_cluster_index"] = None
+                        for item in self.photo_db:
+                            if item["face_cluster_index"] == face_cluster_index:
+                                self.photo_db[index]["name"] = person_name
+                                item["face_cluster_index"] = None
                 
                 QMessageBox.information(
                     preview_dialog,
@@ -1426,34 +1610,201 @@ class PhotoManager(QMainWindow):
         preview_dialog.installEventFilter(drag_filter)
         # 显示对话框
         preview_dialog.exec_()
-    def show_preview(self, person_name, image_paths):
+    def is_person_name(self,person_name):
+        """判断是否是人物名"""
+        flat_list = [item for sublist in self.style_name for item in sublist]
+        if person_name not in flat_list and person_name.split("_")[0] not in flat_list:
+            return True
+        else:
+            return False
+    def  sort_photo(self,title,sort_type):
+        """排序"""
+        if sort_type == "按入库正序":
+            self.person_name_db.sort(key=lambda x: x["add_time"],reverse=False)
+        elif sort_type == "按入库倒序":
+            self.person_name_db.sort(key=lambda x: x["add_time"],reverse=True)
+        elif sort_type == "按最近正序":
+            self.person_name_db.sort(key=lambda x: x["open_time"],reverse=True)
+        elif sort_type == "按最近倒序":
+            self.person_name_db.sort(key=lambda x: x["open_time"],reverse=False)
+        elif sort_type == "按得分正序":
+            self.person_name_db.sort(key=lambda x: x["love_score"],reverse=False)
+        elif sort_type == "按得分倒序":
+            self.person_name_db.sort(key=lambda x: x["love_score"],reverse=True)
+        elif sort_type == "按NSFW正序":
+            self.person_name_db.sort(key=lambda x: x["nsfw_score"],reverse=True)
+        elif sort_type == "按NSFW倒序":
+            self.person_name_db.sort(key=lambda x: x["nsfw_score"],reverse=False)
+        elif sort_type == "随机排序":
+            random.shuffle(self.person_name_db)
+        self.show_preview(title,person_name_db=self.person_name_db)
+    def get_image_path_index(self,photo_db,image_path):
+        """获取图片路径在self.person_name_db中的索引"""
+        path_list = [item["photo_path"] for item in photo_db]
+        return path_list.index(image_path)
+    def switch_nsfw(self):
+        """切换NSFW开关"""
+        self.is_open_nsfw = not self.is_open_nsfw
+        if self.is_open_nsfw:
+            # 过滤掉非NSFW的照片
+            nsfw_list=[item for item in self.person_name_db if item["is_nsfw"] == True]
+            nsfw_list.sort(key=lambda x: x["nsfw_score"],reverse=True)
+            self.show_preview(person_name=self.title, person_name_db=nsfw_list)
+        else:
+            self.show_preview(person_name=self.title, person_name_db=self.person_name_db)
+    def select_all(self,select_btn,heart_btn,delete_btn,sort_photo,switch_btn,database_slash,person_name, image_paths,person_name_db):
+        """选择所有照片"""
+        self.is_select_page = not self.is_select_page
+        if  self.is_select_page:
+            sort_photo.setEnabled(False)
+            switch_btn.setEnabled(False)
+            database_slash.setEnabled(True)
+            database_slash.setVisible(True)
+            self.selected_images=[]
+            select_btn.setIcon(qta.icon("fa5s.tasks",color="#c8c8c8"))
+            heart_btn.setVisible(True)
+            heart_btn.setEnabled(True)
+            delete_btn.setVisible(True)
+            delete_btn.setEnabled(True)
+            select_btn.setIcon(qta.icon("fa5s.check",color="#c8c8c8"))
+        else:
+            self.show_preview(person_name=person_name, image_paths=image_paths,person_name_db=person_name_db)
+    def love_photos(self,selected_images,person_name, image_paths=None,person_name_db=None):
+        """爱心按钮"""
+        self.is_select_page=False
+        for image_path in selected_images:
+            image_index=self.get_image_path_index(self.photo_db,image_path)
+            self.photo_db[image_index]["star"]=True
+        self.selected_images=[]
+        self.show_preview(person_name=person_name, image_paths=image_paths,person_name_db=person_name_db)
+    
+    def show_preview(self, person_name, image_paths=None,person_name_db=None):
         """显示照片预览"""
         # 保存当前人名，用于刷新
         self.title = person_name  # 添加这行
         
         # 清除原有内容
         self.clear_layout(self.preview_layout)
-        self.image_paths = image_paths
+        # self.image_paths = image_paths
         # 创建顶部工具栏
         toolbar = QHBoxLayout()
         
         # 返回按钮
         back_btn = KeyButton("返回")
         # 正确的返  回cards_page或者cards_page_2
-        if self.stacked_layout.currentWidget() == self.cards_page:
+        if self.is_first_page:
             back_btn.clicked.connect(lambda: (self.stacked_layout.setCurrentWidget(self.cards_page),
                                      self.process_photo_db()))
-        elif self.stacked_layout.currentWidget() == self.cards_page_2:
+        else:
             back_btn.clicked.connect(lambda: (self.stacked_layout.setCurrentWidget(self.cards_page_2),
                                      self.process_photo_db()))
+        toolbar.setAlignment(Qt.AlignCenter)
         toolbar.addWidget(back_btn)
         toolbar.addStretch()
-        
+        if person_name_db is None:
+            path_list = [item["photo_path"] for item in self.photo_db]
+            person_name_db=[self.photo_db[path_list.index(item)] for item in image_paths if item in path_list]
+            self.person_name_db = person_name_db
+
         # 添加标题
         if person_name is not None:
             title_label = QLabel(person_name)
-            title_label.setStyleSheet(PAGE_TITLE_STYLE)
+            title_label.setStyleSheet(label_style)
+            title_label.setAlignment(Qt.AlignCenter)
+            # title_label.setFixedSize(len(person_name)*10+40,40)
             toolbar.addWidget(title_label)
+        toolbar.addStretch()
+        delete_btn=KeyButton(tooltip="删除本地照片")
+        delete_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
+        delete_btn.setFixedSize(40,40)
+        delete_btn.setIcon(qta.icon("fa5s.trash",color="#c8c8c8"))
+        database_slash=KeyButton("",tooltip="移出数据库")
+        database_slash.setIcon(qta.icon("fa5s.trash-alt",color="#c8c8c8"))
+        # database_slash.setToolTip("删除数据库")
+        database_slash.setStyleSheet(SWITCH_BUTTON_STYLE)
+        database_slash.setFixedSize(40,40)
+        database_slash.clicked.connect(lambda: self.delete_photo(self.selected_images,is_delete_local=False))
+        toolbar.addWidget(delete_btn)
+        toolbar.addWidget(database_slash)
+        delete_btn.clicked.connect(lambda: (self.delete_photo(self.selected_images)))
+
+        heart_btn=QPushButton()
+        heart_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
+        heart_btn.setFixedSize(40,40)
+        heart_btn.setIcon(qta.icon("fa5s.heart",color="#c8c8c8"))
+        heart_btn.clicked.connect(lambda: self.love_photos(self.selected_images,person_name, image_paths,person_name_db))
+        toolbar.addWidget(heart_btn)
+        # heart_btn.clicked.connect(lambda: self.love_photo(image_paths))
+        select_btn=QPushButton()
+        select_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
+        select_btn.setFixedSize(40,40)
+        toolbar.addWidget(select_btn)
+        # select_btn.clicked.connect(lambda _,select_btn=select_btn,heart_btn=heart_btn,delete_btn=delete_btn,sort_photo=sort_photo,switch_btn=switch_btn,database_slash=database_slash: self.select_all(select_btn,heart_btn,delete_btn,sort_photo,switch_btn,database_slash,person_name, image_paths,person_name_db))
+        sort_photo=QPushButton()
+        sort_photo.setStyleSheet(SWITCH_BUTTON_STYLE)
+        sort_photo.setFixedSize(40,40)
+        sort_photo.setIcon(qta.icon("fa5s.sort-amount-down",color="#c8c8c8")) 
+        sort_photo.setIconSize(QSize(32, 32))
+        sort_type =QMenu()
+        sort_type.setStyleSheet("background-color: #1e1e1e; color: white;")
+        sort_add_time=sort_type.addAction("按入库正序")
+        sort_add_time.triggered.connect(lambda: self.sort_photo(person_name,"按入库正序"))
+        sort_add_time_reverse=sort_type.addAction("按入库倒序")
+        sort_add_time_reverse.triggered.connect(lambda: self.sort_photo(person_name,"按入库倒序"))
+        sort_open=sort_type.addAction("按最近正序")
+        sort_open.triggered.connect(lambda: self.sort_photo(person_name,"按最近正序"))
+        sort_open_reverse=sort_type.addAction("按最近倒序")
+        sort_open_reverse.triggered.connect(lambda: self.sort_photo(person_name,"按最近倒序"))
+        sort_score =sort_type.addAction("按得分正序")
+        sort_score.triggered.connect(lambda: self.sort_photo(person_name,"按得分正序"))
+        sort_score_reverse=sort_type.addAction("按得分倒序")
+        sort_score_reverse.triggered.connect(lambda: self.sort_photo(person_name,"按得分倒序"))
+        sort_nsfw=sort_type.addAction("按NSFW正序")
+        sort_nsfw.triggered.connect(lambda: self.sort_photo(person_name,"按NSFW正序"))
+        sort_nsfw_reverse=sort_type.addAction("按NSFW倒序")
+        sort_nsfw_reverse.triggered.connect(lambda: self.sort_photo(person_name,"按NSFW倒序"))
+        sort_random=sort_type.addAction("随机排序")
+        sort_random.triggered.connect(lambda: self.sort_photo(person_name,"随机排序"))
+        # sort_photo右键点击事件
+        
+        sort_photo.setMenu(sort_type)
+        toolbar.addWidget(sort_photo)
+        
+        # 添加开关
+        switch_btn = KeyButton("",tooltip="NSFW switch")
+        switch_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
+        switch_btn.setFixedSize(40,40)
+
+        select_btn.clicked.connect(lambda _,select_btn=select_btn,heart_btn=heart_btn,delete_btn=delete_btn,sort_photo=sort_photo,switch_btn=switch_btn,database_slash=database_slash: self.select_all(select_btn,heart_btn,delete_btn,sort_photo,switch_btn,database_slash,person_name, image_paths,person_name_db))
+        if not self.is_select_page:
+            heart_btn.setEnabled(False)
+            heart_btn.setVisible(False)
+            delete_btn.setEnabled(False)
+            delete_btn.setVisible(False)
+            database_slash.setEnabled(False)    
+            database_slash.setVisible(False)
+            sort_photo.setEnabled(True)
+            switch_btn.setEnabled(True)
+            select_btn.setIcon(qta.icon("fa5s.tasks",color="#c8c8c8"))
+        else:
+            delete_btn.setVisible(True)
+            delete_btn.setEnabled(True)
+            database_slash.setVisible(True)
+            database_slash.setEnabled(True)
+            heart_btn.setVisible(True)
+            heart_btn.setEnabled(True)
+            switch_btn.setEnabled(False)
+            sort_photo.setEnabled(False)
+            select_btn.setIcon(qta.icon("fa5s.check",color="#c8c8c8"))
+        if self.is_open_nsfw:
+            switch_btn.setIcon(qta.icon("fa5s.toggle-on",color="#c8c8c8")) 
+        else:
+            switch_btn.setIcon(qta.icon("fa5s.toggle-off",color="#c8c8c8")) 
+        switch_btn.setIconSize(QSize(32, 32))
+        # 开关点击后切换形状
+        switch_btn.clicked.connect(self.switch_nsfw)
+        toolbar.addWidget(switch_btn)
+       
         
         self.preview_layout.addLayout(toolbar)
         
@@ -1465,6 +1816,15 @@ class PhotoManager(QMainWindow):
         grid_layout.setContentsMargins(0, 0, 0, 0)
         grid_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         
+        if "重复文件" in person_name:
+            person_name_db.sort(key=lambda x: x["duplicate_index"],reverse=False)
+            image_paths=[item["photo_path"] for item in person_name_db]
+            duplicate_index=[item["duplicate_index"] for item in person_name_db]
+            cows=Counter(duplicate_index)
+
+        else:
+            image_paths=[item["photo_path"] for item in person_name_db]
+
         # 保存图片路径用于重排
         self.current_preview_images = image_paths
         
@@ -1474,12 +1834,12 @@ class PhotoManager(QMainWindow):
         thumbnail_size = int(base_size * scale)
         scroll_width = self.width()  # 使用完整宽度
         columns = max(1, scroll_width // thumbnail_size)
-        
+        self.image_paths = image_paths
         # 添加缩略图
+        row=col=0
+        j=0
         for i, path in enumerate(image_paths):
-            row = i // columns
-            col = i % columns
-            
+
             # 创建缩略图容器
             thumb_container = QWidget()
             thumb_container.setFixedSize(thumbnail_size, thumbnail_size)
@@ -1493,8 +1853,23 @@ class PhotoManager(QMainWindow):
             thumb_label.setStyleSheet(label_style)
             
             # 添加点击事件
-            def create_click_handler(index):
-                return lambda: self.show_photo(image_paths, index)
+
+            def create_click_handler(index,label):
+                #删除thumb_label中的check_btn
+                if self.is_select_page:
+                    # self.selected_images.append(image_paths[index])
+                    check_btn =QCheckBox("check_btn")
+                    check_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
+                    if image_paths[index] in self.selected_images:
+                        self.selected_images.remove(image_paths[index])  
+                        label.setStyleSheet("border: none;")
+                    else:
+                        self.selected_images.append(image_paths[index])
+                        label.setStyleSheet("border: 2px solid red;")
+                else:
+                    image_index=self.get_image_path_index(self.photo_db,image_paths[index])
+                    self.photo_db[image_index]["open_time"]=time.time()
+                    return lambda: self.show_photo(image_paths, index)
                 
             def show_context_menu(event, image_paths, index):
                 if event.button() == Qt.RightButton:
@@ -1503,22 +1878,32 @@ class PhotoManager(QMainWindow):
                     # 加人脸注册选项
                     register_action = menu.addAction("人脸注册")
                     register_action.triggered.connect(lambda: self.register_face(image_paths[index]))
-                    
+                    setting_person_info=menu.addAction("设置人物信息")
+                    setting_person_info.triggered.connect(lambda: self.setting_person_info(image_paths[index]))
                     # 添加删除选项
                     delete_action = menu.addAction("删除照片")
                     delete_action.triggered.connect(lambda: self.delete_photo(image_paths[index]))
+                    database_slash_action = menu.addAction("移出数据库")
+                    database_slash_action.triggered.connect(lambda: self.delete_photo(image_paths[index],is_delete_local=False))
                     open_action = menu.addAction("打开文件夹")
                     open_action.triggered.connect(lambda: QProcess.startDetached('explorer.exe', ['/select,', image_paths[index]]))
                     # 在鼠标位置显示菜单
-
+                    # setting_person_info=menu.addAction("设置人物信息")
+                    # setting_person_info.triggered.connect(lambda: self.setting_person_info(image_paths[index]))
                     menu.exec_(event.globalPos())
             
             # 绑定右键菜单事件
-            thumb_label.mousePressEvent = lambda e, i=i: (
-                create_click_handler(i)() if e.button() == Qt.LeftButton 
-                else show_context_menu(e, image_paths, i)
-            )
-            thumb_label.setCursor(Qt.PointingHandCursor)
+            def handle_mouse_press(event,i,label):
+                if event.button() == Qt.LeftButton:
+                    if self.is_select_page:
+                       create_click_handler(i,label)
+                    else:
+                        handler=create_click_handler(i,label)
+                        handler()
+                if event.button() == Qt.RightButton:
+                    show_context_menu(event, image_paths, i)
+            thumb_label.mousePressEvent = lambda e, i=i,label=thumb_label: handle_mouse_press(e, i,label)
+            
             
             # 异步加载缩略图
             def load_thumbnail(label, img_path):
@@ -1534,6 +1919,7 @@ class PhotoManager(QMainWindow):
                                 pixmap = QPixmap.fromImage(image)
                                 if not sip.isdeleted(label):
                                     label.setPixmap(pixmap)
+                                    label.setStyleSheet("border: none;")
                     except Exception as e:
                         print(f"加载缩略图失败 {img_path}: {str(e)}")
             
@@ -1548,7 +1934,15 @@ class PhotoManager(QMainWindow):
             
             # 添加到网格
             grid_layout.addWidget(thumb_container, row, col, Qt.AlignTop)
-        
+            col = col+1
+            if "重复文件" in person_name:
+                if col >= cows[j]:
+                    row = row + 1
+                    col = 0
+                    j += 1
+            if col > columns:
+                row = row + 1
+                col = 0
         # 设置滚动区域
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -1558,8 +1952,22 @@ class PhotoManager(QMainWindow):
         
         # 切换到预览页面
         self.stacked_layout.setCurrentWidget(self.preview_page)
-    
+    def love_photo(self,image_index,love_btn):
+        """爱心按钮"""
+        if self.photo_db[image_index]["star"]:
+            # print(self.photo_db[image_index]["star"])
+            self.photo_db[image_index]["star"]=False
+            
+            love_icon = qta.icon("fa5s.heart",option=[{"color":"#1e1e1e","border":"2px solid #c8c8c8"}])
+            love_btn.setIcon(love_icon)
+        else:
+            # print(self.photo_db[image_index]["star"])
+            self.photo_db[image_index]["star"]=True
+            love_icon = qta.icon("fa5s.heart",color="#c8c8c8",border=True,border_color="#c8c8c8")
+            love_btn.setIcon(love_icon)
+        # self.show_photo(image_paths,current_index)
     def show_photo(self, image_paths, current_index):
+
         """显示单张照片查看界面"""
         # 如果已经存在photo_view_page，先移除它
         if hasattr(self, 'photo_view_page') and self.photo_view_page is not None:
@@ -1576,6 +1984,7 @@ class PhotoManager(QMainWindow):
         # 创建工具栏容器
         toolbar_widget = QWidget()
         toolbar = QHBoxLayout(toolbar_widget)
+        toolbar.setAlignment(Qt.AlignCenter)
         toolbar.setContentsMargins(10, 10, 10, 10)
         
         # 返回按钮
@@ -1596,7 +2005,31 @@ class PhotoManager(QMainWindow):
         toolbar.addWidget(count_label)
         # 让返回按钮和计数标签居中
         toolbar.addStretch()
+        # 爱心按钮
+        love_btn = QPushButton()
+        love_btn.setFixedSize(40,40)
+        # love_btn.setIcon(qta.icon("fa5s.heart",color="#c8c8c8"))
+        love_btn.setIconSize(QSize(32, 32))
+        love_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
+        image_index=self.get_image_path_index(self.photo_db,image_paths[current_index])
         
+        if self.photo_db[image_index]["star"]:
+            love_icon = qta.icon("fa5s.heart",color="#c8c8c8",border=True,border_color="#c8c8c8")
+            love_btn.setIcon(love_icon)
+        else:
+            love_icon = qta.icon("fa5s.heart",option=[{"color":"#1e1e1e","border":"2px solid #c8c8c8"}])
+            love_btn.setIcon(love_icon)
+            # love_btn.setStyleSheet("border: 2px solid #ffffff;")
+        love_btn.clicked.connect(lambda _,love_btn=love_btn:self.love_photo(image_index,love_btn))
+        setting_person_info_btn = QPushButton()
+        # setting_person_info_btn.setFixedSize(100, 40)
+        setting_person_info_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
+        setting_person_info_btn.setIcon(qta.icon("fa5s.user-edit",color="#c8c8c8"))
+        setting_person_info_btn.clicked.connect(lambda: self.setting_person_info(image_paths[current_index]))
+        toolbar.addWidget(setting_person_info_btn)
+        toolbar.addWidget(love_btn)
+
+
         # 将工具栏容器添加到主布局
         main_layout.addWidget(toolbar_widget)
         
@@ -1803,11 +2236,8 @@ class PhotoManager(QMainWindow):
         # 添加键盘事件
         def keyPressEvent(event):
             # 在照片查看页面时才处理这些按键
-            # print("当前页面",self.stacked_layout.currentWidget())
             if self.stacked_layout.currentWidget() == self.photo_view_page:
-                # print("在照片查看页面")
                 if event.key() in (Qt.Key_Left, Qt.Key_Up):
-                    # print("左键")
                     show_prev()
                     event.accept()  # 标记事件已处理
                     return  # 直接返回，不再传递事件
@@ -1830,7 +2260,7 @@ class PhotoManager(QMainWindow):
         # 添加鼠标移动事件处理
         def mouseMoveEvent(event):
             # 获取按钮区域（调整区域宽度）
-            print("mouseMoveEvent")
+
             prev_area = QRect(0, 0, 150, photo_container.height())
             next_area = QRect(photo_container.width() - 150, 0, 150, photo_container.height())
             
@@ -1839,7 +2269,6 @@ class PhotoManager(QMainWindow):
             
             # 显示/隐藏按钮
             if prev_area.contains(pos):
-                print("prev_area.contains(pos)")
                 prev_btn.show()
             else:
                 prev_btn.hide()
@@ -2005,14 +2434,13 @@ class PhotoManager(QMainWindow):
         if reply == QMessageBox.Yes:
             self.register_face(image_path)
         else:
-            self.photo_db.append({
-                "name": "未识别",
-                "photo_path": image_path,
-                "embedding": np.array([]),
-                "is_nsfw": False,
-                "nsfw_score": 0,
-                "nsfw_class": "safe"
-            })
+            self.photo_db.append(self.person_info_base.copy())
+            self.photo_db[-1]["name"]="未识别"
+            self.photo_db[-1]["photo_path"]=image_path
+            self.photo_db[-1]["embedding"]=np.array([])
+            self.photo_db[-1]["add_time"]=time.time()
+            self.photo_db[-1]["open_time"]=time.time()
+
         # 无论用户是否选择注册，都恢复线程运行
         self.process_worker.resume()
 
@@ -2076,6 +2504,7 @@ class PhotoManager(QMainWindow):
         def switch_complete():
             if to_first_page:
                 # 切换到第一个页面（主页面）
+                self.is_first_page = True
                 self.stacked_layout.setCurrentWidget(self.cards_page)
                 self.left_btn.setEnabled(False)
                 self.right_btn.setEnabled(True)
@@ -2083,6 +2512,7 @@ class PhotoManager(QMainWindow):
             else:
                 # 切换到第二个页面（未识别/无人脸页面）
                 self.stacked_layout.setCurrentWidget(self.cards_page_2)
+                self.is_first_page = False
                 self.left_btn.setEnabled(True)
                 self.right_btn.setEnabled(False)
                 self.page_title.setText("风格界面")  # 更新标题
@@ -2115,7 +2545,8 @@ class NSFWWorker(QThread):
                 #
                 time.sleep(0.01)
         for item in self.photo_db:
-            if "is_nsfw" not in item or "nsfw_score" not in item or "nsfw_class" not in item:
+            if item["is_nsfw"] is None :
+                # print("开始检测")
                 is_nsfw,score,class_name = self.nsfw_classifier.classify_image(item["photo_path"])
             else:
                 is_nsfw = item["is_nsfw"]
@@ -2130,7 +2561,7 @@ class NSFWWorker(QThread):
 
 # 添加人脸聚类线程
 class FaceClusteringWorker(QThread):
-    finished = pyqtSignal(dict)
+    finished = pyqtSignal(list)
     def __init__(self, photo_db, face_clusterer):
         super().__init__()
         self.photo_db = photo_db
@@ -2139,16 +2570,16 @@ class FaceClusteringWorker(QThread):
         embeddings = []
         all_paths = []
         for item in self.photo_db:
-            if item['embedding'] != np.array([]) :
+            if item['embedding'] != np.array([]) and item['name'] is not None and item['name'] != "未识别":
+                # print(item['name'])
                 embeddings.append(item['embedding'])
                 all_paths.append(item['photo_path'])
         if len(embeddings) > 0:
-            # print("开始聚类")
             clusters = self.face_clusterer.cluster_faces(embeddings,all_paths)
-            # print("clusters",(clusters))
+            # print(len(clusters))
             self.finished.emit(clusters)
         else:
-            self.finished.emit({})
+            self.finished.emit([])
 
 #添加去除重复文件线程
 class RemoveDuplicatesWorker(QThread):
@@ -2247,11 +2678,19 @@ class PhotoProcessWorker(QThread):
                 if item["nsfw_class"] not in results['face_db']:
                         results['face_db'][item["nsfw_class"]] = []
                 results['face_db'][item["nsfw_class"]].append(item["photo_path"])
+            if 'face_cluster_index' in item and item["face_cluster_index"] is not None:
+                if "未知人物_{}".format(item["face_cluster_index"]) not in results['face_db']:
+                    results['face_db']["未知人物_{}".format(item["face_cluster_index"])] = []
+                results['face_db']["未知人物_{}".format(item["face_cluster_index"])].append(item["photo_path"])
             if 'duplicate_index' in item and item["duplicate_index"] is not None:
                 duplicate_index_category = "重复文件_{}".format(item["duplicate_index"])
                 if "重复文件" not in results['face_db']:
                     results['face_db']["重复文件"] = []
                 results['face_db']["重复文件"].append(item["photo_path"])
+            if 'star' in item and item["star"] == True:
+                if "收藏" not in results['face_db']:
+                    results['face_db']["收藏"] = []
+                results['face_db']["收藏"].append(item["photo_path"])
             if '全部' not in results['face_db']:
                 results['face_db']['全部'] = []
             results['face_db']['全部'].append(item["photo_path"])
@@ -2294,13 +2733,15 @@ class ProcessWorker(QThread):
         if matched_name:
             # 创建对应人名的文件夹
             # copy_photo(matched_name,file_path,self.output_dir)
-            person_info = {
-                "name": matched_name,
-                "age": age,
-                "gender": gender,
-                "embedding": matched_embedding,
-                "photo_path": normalize_path(file_path),
-            }
+            person_info = person_info_base.copy()
+            person_info["name"]=matched_name
+            person_info["age"]=age
+            person_info["gender"]=gender
+            person_info["embedding"]=matched_embedding
+            person_info["photo_path"]=normalize_path(file_path)
+            person_info["add_time"]=time.time()
+            person_info["open_time"]=time.time()
+           
         else:
                 # 发出注册请求信号并等待
                 self.pause()  # 暂停线程
@@ -2326,6 +2767,7 @@ class ProcessWorker(QThread):
                                     self.total_register_person[person_info["name"]] = 1
                                 else:
                                     self.total_register_person[person_info["name"]] += 1
+               
             except Exception as e:
                 self.error.emit(str(e))
             

@@ -114,7 +114,7 @@ class FaceClusterer:
         clustering = DBSCAN(eps=self.eps, min_samples=self.min_samples, metric='precomputed')
         labels = clustering.fit(distance)
         labels = clustering.labels_
-        result = {}
+        result = []
         unique_labels = set(labels)
         j=0
         for label in unique_labels:
@@ -122,8 +122,7 @@ class FaceClusterer:
                 continue
             indices = np.where(labels == label)[0]
             if len(indices) >= self.min_samples:
-                key = f'未知人物_{j}'
-                result[key] = [all_paths[i] for i in indices]
+                result.append([all_paths[i] for i in indices])
                 j+=1
         return result
     def get_clusters(self, input_dir, output_path=None):

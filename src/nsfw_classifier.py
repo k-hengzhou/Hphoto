@@ -77,7 +77,6 @@ class NSFWClassifier:
                 if cls_score > score:
                     score = cls_score
                     class_name = cls
-                # score_total = float(np.exp(score_total))
             # 获取分类结果
             # score = result[image_path]['unsafe']
             is_nsfw = score_total >= self.unsafe_threshold

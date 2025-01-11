@@ -25,7 +25,27 @@
 <div align="center">
 <table>
 
+<tr>
 <td><img src="assets/preview1.png" alt="主界面" width="400"/></td>
+</tr>
+<tr>
+<td><img src="assets/preview2.png" alt="添加界面" width="400"/></td>
+</tr>
+<tr>
+<td><img src="assets/preview3.png" alt="设置界面" width="400"/></td>
+</tr>
+<tr>
+<td><img src="assets/preview4.png" alt="批量删除界面" width="400"/></td>
+</tr>
+<tr>
+<td><img src="assets/preview5.png" alt="批量收藏界面" width="400"/></td>
+</tr>
+<tr>
+<td><img src="assets/preview6.png" alt="批量排序界面" width="400"/></td>
+</tr>
+<tr>
+<td><img src="assets/preview7.png" alt="批量排序界面" width="400"/></td>
+</tr>
 </table>
 </div>
 
@@ -69,7 +89,9 @@
         • 重复照片检测<br>
         • 文件夹监控<br>
         • 拖拽操作支持<br>
-        • 多种视图模式
+        • 支持批量删除
+        • 支持收藏功能
+        • 支持排序功能
     </td>
 </tr>
 </table>
@@ -106,9 +128,10 @@
 
 ### 4. 文件管理
 - 重复照片检测
-- 文件夹监控
 - 支持拖拽操作
-- 多种视图模式
+- 支持批量收藏
+- 支持排序功能
+- 支持评分功能
 
 ## 🛠️ 安装与配置
 
@@ -211,17 +234,10 @@ mv detector_v2_default_checkpoint.onnx model/640m.onnx
 ## 📝 待办事项
 
 
-- [ ] 支持视频处理
-- [ ] 增加图片多选
-- [ ] 增加图片批量删除
-- [ ] 增加图片批量重命名
-- [ ] 增加图片批量移动
-- [ ] 增加图片批量复制
-- [ ] 增加图片批量删除
-- [ ] 增加数据库支持
-- [ ] 增加排序功能
-- [ ] 增加搜索功能
-- [ ] 增加刷选功能
+- [x] 增加图片多选
+- [x] 增加图片批量删除
+- [x] 增加数据库支持
+- [x] 增加排序功能
 - [ ] bug解决
 
 ## 🤝 贡献指南
