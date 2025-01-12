@@ -1515,12 +1515,27 @@ class PhotoManager(QMainWindow):
         name_layout.addWidget(name_input)
         layout.addLayout(name_layout)
         button_layout = QHBoxLayout()
-        confirm_btn = KeyButton("确认")
-        cancel_btn = KeyButton("取消")
+        confirm_btn = KeyButton("确认",tooltip="确认注册")
+        cancel_btn = KeyButton("取消",tooltip="取消注册")
+        no_face_btn = KeyButton("入库",tooltip="只入库，不注册人脸")
+        button_layout.addWidget(no_face_btn)
         button_layout.addWidget(confirm_btn)
         button_layout.addWidget(cancel_btn)
         layout.addLayout(button_layout)
-        
+        def on_no_face():
+            person_name = name_input.text().strip()
+            if person_name is None or person_name == "":
+                person_name="未识别"
+            person_info =self.person_info_base.copy()
+            person_info["name"]=person_name
+            person_info["age"]=faces[combo_box.currentIndex()].age
+            person_info["gender"]=faces[combo_box.currentIndex()].gender
+            person_info["photo_path"]=normalize_path(image_path)
+            person_info["embedding"]=faces[combo_box.currentIndex()].embedding
+            person_info["add_time"]=time.time()
+            person_info["open_time"]=time.time()
+            self.photo_db.append(person_info)
+            preview_dialog.accept()
         # 处理确认按钮点击
         def on_confirm():
             person_name = name_input.text().strip()
@@ -1581,9 +1596,10 @@ class PhotoManager(QMainWindow):
                 # 发生错误时也要恢复线程
                 if hasattr(self, 'process_worker'):
                     self.process_worker.resume()
-        
+        no_face_btn.clicked.connect(on_no_face)
         # 绑定按钮事件
         confirm_btn.clicked.connect(on_confirm)
+
         cancel_btn.clicked.connect(preview_dialog.reject)
         
         # 添加鼠标拖动功能
@@ -2470,22 +2486,22 @@ class PhotoManager(QMainWindow):
 
     def handle_unknown_face(self, image_path):
         """处理未识别的人脸"""
-        reply = QMessageBox.question(
-            self,
-            "未识别的人脸",
-            f"在图片 {os.path.basename(image_path)} 中检测到未识别的人脸，是否要注册？"
-        )
+        # reply = QMessageBox.question(
+        #     self,
+        #     "未识别的人脸",
+        #     f"在图片 {os.path.basename(image_path)} 中检测到未识别的人脸，是否要注册？"
+        # )
         
         
-        if reply == QMessageBox.Yes:
-            self.register_face(image_path)
-        else:
-            self.photo_db.append(self.person_info_base.copy())
-            self.photo_db[-1]["name"]="未识别"
-            self.photo_db[-1]["photo_path"]=image_path
-            self.photo_db[-1]["embedding"]=np.array([])
-            self.photo_db[-1]["add_time"]=time.time()
-            self.photo_db[-1]["open_time"]=time.time()
+        # if reply == QMessageBox.Yes:
+        self.register_face(image_path)
+        # else:
+        #     self.photo_db.append(self.person_info_base.copy())
+        #     self.photo_db[-1]["name"]="未识别"
+        #     self.photo_db[-1]["photo_path"]=image_path
+        #     self.photo_db[-1]["embedding"]=np.array([])
+        #     self.photo_db[-1]["add_time"]=time.time()
+        #     self.photo_db[-1]["open_time"]=time.time()
 
         # 无论用户是否选择注册，都恢复线程运行
         self.process_worker.resume()

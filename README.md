@@ -16,7 +16,7 @@
 
 > 一个基于AI的智能照片管理工具，支持人脸识别、相似人脸自动聚类和nsfw检测
 
-[English](./README_EN.md) | 简体中文 | [日本語](./README_JP.md)
+[English](docs/README_EN.md) | 简体中文 | [日本語](docs/README_JP.md)
 
 </div>
 
