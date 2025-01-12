@@ -115,6 +115,7 @@ class FaceClusterer:
         labels = clustering.fit(distance)
         labels = clustering.labels_
         result = []
+        # print(labels)
         unique_labels = set(labels)
         j=0
         for label in unique_labels:

@@ -1,10 +1,10 @@
 {
-    "last_photo_db": "D:/project/Hphoto/info/lady.msgpack",
+    "last_photo_db": "D:/project/Hphoto/info/lady4.msgpack",
     "window_state": {
         "width": 1500,
         "height": 900,
-        "x": 100,
-        "y": 100,
+        "x": 561,
+        "y": 351,
         "maximized": false
     },
     "face_recognition": {
@@ -24,8 +24,8 @@
         "backup": false
     },
     "face_clustering": {
-        "min_samples": 3,
-        "eps": 0.3
+        "min_samples": 7,
+        "eps": 0.2
     },
     "nsfw_classifier": {
         "unsafe_threshold": 0.6,

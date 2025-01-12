@@ -111,10 +111,12 @@ class FaceOrganizer:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             faces = self.face_analyzer.get(img)
             # 过滤掉检测得分小于0.7的矩形框
+            if faces is  None:
+                return None,None,None
             faces = [face for face in faces if face.det_score > self.confidence]
             # 过滤掉特征向量长度小于512的矩形框
             faces = [face for face in faces if len(face.embedding) >= 512 ]
-            return (faces, img) if faces else (None, img)
+            return (faces, img) if faces is not None and len(faces) > 0 else (None, img)
             
         except Exception:
             return None,None
@@ -122,9 +124,9 @@ class FaceOrganizer:
     def compare_face(self,image_path):
         """比较人脸"""
         result = self.detect_faces(image_path)
-        if result is None:
+        faces = result[0]
+        if faces is None:
             return None,np.array([]),None,None
-        faces, img = result
         max_similarity = 0
         matched_name = None
         matched_embedding = None
