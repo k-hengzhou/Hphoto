@@ -10,7 +10,7 @@
     "face_recognition": {
         "threshold": 0.5,
         "backup_db": false,
-        "db_path": "D:/project/Hphoto/info/celebrity.msgpack",
+        "db_path": "D:/project/info/celebrity.msgpack",
         "update_db": true,
         "ingest_model_path": "model",
         "ingest_model_provider": "CPUExecutionProvider",

@@ -882,7 +882,7 @@ class PhotoManager(QMainWindow):
                 dialog,
                 "选择数据库文件",
                 "",
-                "PKL文件 (*.pkl)"
+                "所有文件 (*.*)"
             )
             if path:
                 db_input.setText(path)
@@ -1642,13 +1642,14 @@ class PhotoManager(QMainWindow):
         """获取图片路径在self.person_name_db中的索引"""
         path_list = [item["photo_path"] for item in photo_db]
         return path_list.index(image_path)
-    def switch_nsfw(self):
+    def switch_nsfw(self,is_show_preview=True):
         """切换NSFW开关"""
         self.is_open_nsfw = not self.is_open_nsfw
         if self.is_open_nsfw:
             # 过滤掉非NSFW的照片
             nsfw_list=[item for item in self.person_name_db if item["is_nsfw"] == True]
             nsfw_list.sort(key=lambda x: x["nsfw_score"],reverse=True)
+            
             self.show_preview(person_name=self.title, person_name_db=nsfw_list)
         else:
             self.show_preview(person_name=self.title, person_name_db=self.person_name_db)
@@ -1798,6 +1799,9 @@ class PhotoManager(QMainWindow):
             select_btn.setIcon(qta.icon("fa5s.check",color="#c8c8c8"))
         if self.is_open_nsfw:
             switch_btn.setIcon(qta.icon("fa5s.toggle-on",color="#c8c8c8")) 
+            nsfw_list=[item for item in self.person_name_db if item["is_nsfw"] == True]
+            nsfw_list.sort(key=lambda x: x["nsfw_score"],reverse=True)
+            person_name_db=nsfw_list
         else:
             switch_btn.setIcon(qta.icon("fa5s.toggle-off",color="#c8c8c8")) 
         switch_btn.setIconSize(QSize(32, 32))
@@ -1835,6 +1839,7 @@ class PhotoManager(QMainWindow):
         scroll_width = self.width()  # 使用完整宽度
         columns = max(1, scroll_width // thumbnail_size)
         self.image_paths = image_paths
+        person_info_label=QLabel()
         # 添加缩略图
         row=col=0
         j=0
@@ -1851,9 +1856,50 @@ class PhotoManager(QMainWindow):
             thumb_label.setText("加载中...")
             thumb_container.setStyleSheet(container_style)
             thumb_label.setStyleSheet(label_style)
+            #添加一个鼠标长时间悬停事件
+            # thumb_label.setMouseTracking(True)
+            # thumb_label.enterEvent = lambda event: thumb_label.setText("悬停")
+            # thumb_label.leaveEvent = lambda event: thumb_label.setText("加载中...")
+            def create_hover_handler(label):
+                def enterEvent(event):
+                    # label.setText("悬停")
+                    # label.setToolTip("悬停")
+                    #获取鼠标位置
+                    # mouse_pos = (event.globalPos())
+                    #获取鼠标位置在self.person_name_db中的索引
+                    #获取label 位置
+                    label_pos = label.mapToGlobal(QPoint(0, 0))
+                    # mouse_pos = label.mapFromGlobal(event.globalPos())
+                    person_index=self.get_image_path_index(self.person_name_db,image_paths[i])
+                    str = f"姓名：{self.person_name_db[person_index]['name']} 年龄：{self.person_name_db[person_index]['age']} "
+                    str += f"性别：{self.person_name_db[person_index]['gender']}\n"
+                    str += f"is_star： {self.person_name_db[person_index]['star']} "
+                    str += f"score： {self.person_name_db[person_index]['love_score']}\n"
+                    str += f"nsfw_class： {self.person_name_db[person_index]['nsfw_class']} "
+                    str += f"NSFW： {self.person_name_db[person_index]['nsfw_score']}\n"
+                    str += f"image_path： {self.person_name_db[person_index]['photo_path']}"
+
+
+                    person_info_label.setText(str)
+                    # person_info_label.setFixedSize(200,100)
+                    person_info_label.setStyleSheet("background-color: #1e1e1e; color: white;")
+                    person_info_label.setAlignment(Qt.AlignCenter)
+                    #移除标题栏
+                    person_info_label.setWindowFlags(Qt.FramelessWindowHint)
+                    # person_info_label.setFixedSize(100,40)
+                    person_info_label.move(label_pos.x(),label_pos.y())
+                    person_info_label.show()
+
+                def leaveEvent(event):
+                    person_info_label.hide()
+                #     label.setText("加载中...")
+    
+                    # 将事件处理器绑定到标签
+                thumb_label.enterEvent = enterEvent
+                thumb_label.leaveEvent = leaveEvent
+            create_hover_handler(thumb_label)   
             
             # 添加点击事件
-
             def create_click_handler(index,label):
                 #删除thumb_label中的check_btn
                 if self.is_select_page:
