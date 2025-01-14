@@ -1,10 +1,10 @@
 {
-    "last_photo_db": "D:/project/Hphoto/info/lady4.msgpack",
+    "last_photo_db": "D:/project/Hphoto/info/lady.msgpack",
     "window_state": {
         "width": 1500,
         "height": 900,
-        "x": 561,
-        "y": 351,
+        "x": 100,
+        "y": 100,
         "maximized": false
     },
     "face_recognition": {
@@ -43,8 +43,7 @@
             "BUTTOCKS_COVERED"
         ]
     },
-    "photo_db_path": [
-        "",
-        ""
-    ]
+    "duplicate_photo": {
+        "eps": 0.9
+    }
 }

@@ -410,7 +410,9 @@ class FaceOrganizer:
         print(f"成功率: {processed_files/total_files*100:.1f}%")
         
         return total_files, processed_files
-
+    def compare_face_from_embedding(self,em1,em2):
+        similarity =self._calculate_cosine_similarity(em1,em2)
+        return similarity >self.threshold
     def _calculate_cosine_similarity(self, embedding1, embedding2):
         """计算两个特征向量的余弦相似度"""
         # 计算点积

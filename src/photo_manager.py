@@ -353,7 +353,6 @@ class PhotoManager(QMainWindow):
         
         self.photo_db = []
         self.photo_db_len = 0
-        self.first_process = True
         self.is_first_page = True
         self.is_open_nsfw = False
         self.is_select_page = False
@@ -378,10 +377,10 @@ class PhotoManager(QMainWindow):
                 backup_db=backup_db                   # 启用数据库备份
             )
             # 等待五分后在启动人脸识别器
-            self.timer = QTimer()
-            self.timer.timeout.connect(lambda:self.create_thread())
-            self.timer.start(300000)
-            self.face_db={}
+            # self.timer = QTimer()
+            # self.timer.timeout.connect(lambda:self.create_thread())
+            # self.timer.start(300000)
+            # self.face_db={}
 
             if self.face_organizer.known_faces is not None:
                 print("人脸识别器初始化成功")
@@ -427,7 +426,9 @@ class PhotoManager(QMainWindow):
         self.current_index = 0
         # 工作线程
         self.worker = None
-        
+        self.nsfw_worker = None
+        self.face_clustering_worker = None
+        self.duplicate_worker = None
         # 设置窗口样式
         self.setStyleSheet(MAIN_WINDOW_STYLE)
         
@@ -468,6 +469,7 @@ class PhotoManager(QMainWindow):
                                     nsfw_class=self.nsfw_class)
         self.face_clusterer = FaceClusterer(eps=get_config(self.config,'face_clustering','eps',0.6),
                                             min_samples=get_config(self.config,'face_clustering','min_samples',1))
+        self.duplicates_remover = DuplicateRemover(similarity_threshold=get_config(self.config,'duplicate_photo','eps',0.9))
         self.photo_db_path = self.config['last_photo_db']
         self.photo_db = []
         if os.path.exists(self.photo_db_path):
@@ -476,8 +478,10 @@ class PhotoManager(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"打开照片数据库失败: {str(e)}")
                     # 初始化NSFW分类器
-
-        # self.nsfw_classify()
+        self.thread_timer = QTimer()
+        self.thread_timer.timeout.connect(self.create_thread)
+        # 每分钟执行一次
+        self.thread_timer.start(60*1000)
         
         
         # 保存原始的键盘事件处理函数
@@ -489,6 +493,7 @@ class PhotoManager(QMainWindow):
         file_name,_ = QFileDialog.getOpenFileName(self, "打开照片数据库", "photo.msgpack","所有文件 (*.*);;数据库文件 (*.msgpack)")
         if file_name:
             self.photo_db_path = file_name
+            self.config['last_photo_db'] = file_name
             self.open_photo_db()
     def save_file(self):
         """保存照片文件"""
@@ -520,7 +525,8 @@ class PhotoManager(QMainWindow):
         with open(self.photo_db_path, 'wb') as f:
             msgpack.pack(self.photo_db, f)
     def handle_face_clustering(self,clusters):
-        face_cluster_list =[item["face_cluster_index"] for item in self.photo_db if "face_cluster_index" in item and item["face_cluster_index"] is not None]
+        face_cluster_list =[item["face_cluster_index"] for item in 
+                            self.photo_db if item["face_cluster_index"] is not None]
         for i in range(len(clusters)):
             j=0
             while j in face_cluster_list:
@@ -529,9 +535,10 @@ class PhotoManager(QMainWindow):
                 photo_db_index = self.get_image_path_index(self.photo_db,item)
                 self.photo_db[photo_db_index]['face_cluster_index'] = j
             face_cluster_list.append(j)
-        # self.face_db.update(clusters)
-        person_name = list(self.face_db.keys())
-        # print(person_name)
+        for item in self.photo_db:
+            if item['face_cluster_index'] is None:
+                item['face_cluster_index'] = -1
+
     def handle_duplicates(self,photo_db):
         for i in range(len(photo_db)):
             if 'duplicate_index' not in photo_db[i] :
@@ -546,15 +553,35 @@ class PhotoManager(QMainWindow):
         """清理人脸数据库"""
         msg = clean_face_database(db_path=db_path,output_path=output_path,method=method,eps=float(eps),min_samples=int(min_samples)   ,backup=backup)
         QMessageBox.information(self, "清理结果", msg)
-    def add_face_clustering(self,min_samples,eps):
+    def add_face_clustering(self,min_samples,eps,restart=False):
         """添加人脸聚类"""
+        if self.face_clustering_worker is not None:
+            if self.face_clustering_worker.isRunning():
+                if restart:
+                    self.face_clustering_worker.terminate()
+                else:
+                    return
+        if restart:
+            for item in self.photo_db:
+                item["face_cluster_index"] = None
         self.face_clustering_worker = FaceClusteringWorker(self.photo_db,self.face_clusterer,self.face_organizer)
         self.face_clustering_worker.finished.connect(self.handle_face_clustering)
         self.face_clustering_worker.start()
         # msg = add_face_clustering(min_samples=int(min_samples),eps=float(eps))
         # QMessageBox.information(self, "人脸聚类结果", msg)
-    def nsfw_classify(self):
+    def nsfw_classify(self,restart=False):
         """NSFW分类"""
+        if self.nsfw_worker is not None:
+            if self.nsfw_worker.isRunning():
+                if restart:
+                    self.nsfw_worker.terminate()
+                else:
+                    return
+        if restart:
+            for item in self.photo_db:
+                item["is_nsfw"] = None
+                item["nsfw_score"] = 0
+                item["nsfw_class"] = ""
         self.nsfw_worker = NSFWWorker(self.photo_db,self.nsfw_classifier,self.unsafe_threshold)
         self.nsfw_worker.finished.connect(self.handle_nsfw)
         self.nsfw_worker.start()
@@ -565,9 +592,9 @@ class PhotoManager(QMainWindow):
             self.photo_db[i]["nsfw_class"] = results[i]["nsfw_class"]
             self.photo_db[i]["is_nsfw"] = results[i]["is_nsfw"]
         # self.process_photo_db()
-    def setting_person_info(self,image_path):
+    def setting_person_info(self,image_path_list):
         """设置人物信息"""
-        image_index=self.get_image_path_index(self.photo_db,image_path)
+        image_index=self.get_image_path_index(self.photo_db,image_path_list[0])
         gender_list =["男","女"]
         dialog = QDialog(self)
         dialog.setWindowTitle("设置人物信息")
@@ -606,6 +633,15 @@ class PhotoManager(QMainWindow):
         nsfw_score_input = QLineEdit()
         nsfw_score_input.setText(f"{self.photo_db[image_index]['nsfw_score']:.2f}")
         nsfw_score_input.setFixedSize(100, 40)
+        duplicate_index_label = QCheckBox("重复照片")
+        duplicate_index_label.setChecked(self.photo_db[image_index]["duplicate_index"] is not None and self.photo_db[image_index]["duplicate_index"] != -1)
+        layout.addWidget(duplicate_index_label)
+        face_cluster_index_label = QCheckBox("人脸聚类")
+        face_cluster_index_label.setChecked(self.photo_db[image_index]["face_cluster_index"] is not None and self.photo_db[image_index]["face_cluster_index"] != -1)
+        layout_1 = QHBoxLayout()
+        layout_1.addWidget(face_cluster_index_label)
+        layout_1.addWidget(duplicate_index_label)
+        layout.addLayout(layout_1)
         is_nsfw_layout.addWidget(is_nsfw_label)
         is_nsfw_layout.addWidget(is_nsfw_input)
         is_nsfw_layout.addStretch()
@@ -629,26 +665,37 @@ class PhotoManager(QMainWindow):
         save_btn.clicked.connect(lambda: save_person_info())
         save_btn_layout.addWidget(save_btn)
         def save_person_info():
-            person_info =self.photo_db[image_index]
-            person_info["name"] = name_input.text()
-            person_info["age"] = int(age_input.text())
-            person_info["gender"] = gender_list.index(gender_input.currentText())
-            person_info["is_nsfw"] = is_nsfw_input.isChecked()
-            person_info["star"] = star_combo.isChecked()
-            person_info["love_score"] = float(score_input.text())
+            for image_path in image_path_list:
+                image_index=self.get_image_path_index(self.photo_db,image_path)
+                person_info =self.photo_db[image_index]
+                person_info["name"] = name_input.text()
+                person_info["age"] = int(age_input.text())
+                person_info["gender"] = gender_list.index(gender_input.currentText())
+                person_info["is_nsfw"] = is_nsfw_input.isChecked()
+                person_info["star"] = star_combo.isChecked()
+                person_info["love_score"] = float(score_input.text())
+                if duplicate_index_label.isChecked():
+                    person_info["duplicate_index"] = None
+                else:
+                    person_info["duplicate_index"] = -1
+                if face_cluster_index_label.isChecked():
+                    person_info["face_cluster_index"] = None
+                else:
+                    person_info["face_cluster_index"] = -1
             dialog.close()
         # 取消按钮
         cancel_btn = QPushButton("取消")
         cancel_btn.clicked.connect(dialog.close)
         save_btn_layout.addWidget(cancel_btn)
         layout.addLayout(save_btn_layout)
+        self.selected_images = []
         dialog.exec_()
     
     def setting(self):
         """设置对话框"""
         dialog = QDialog(self)
         dialog.setWindowTitle("设置")
-        dialog.setFixedSize(500, 1000)
+        dialog.setFixedSize(500, 1200)
         dialog.setStyleSheet(SETTINGS_DIALOG_STYLE)
         
         # 创建布局
@@ -788,7 +835,7 @@ class PhotoManager(QMainWindow):
         clean_layout.addLayout(clean_backup_layout)
 
         clean_btn = QPushButton("清理")
-        clean_btn.setStyleSheet("background-color: #2d2d2d;color: #cccccc;border: none;padding: 8px 16px;border-radius: 4px;")
+        # clean_btn.setStyleSheet("background-color: #2d2d2d;color: #cccccc;border: none;padding: 8px 16px;border-radius: 4px;")
         # clean_btn.setFixedSize(100, 30)
         clean_btn.clicked.connect(lambda: self.clean_face_db(db_input.text(),
                                                             clean_db_output.text(),
@@ -815,11 +862,10 @@ class PhotoManager(QMainWindow):
         face_clustering_eps_layout.addWidget(face_clustering_eps_label)
         face_clustering_eps_layout.addWidget(face_clustering_eps_input)
         face_clustering_min_samples_layout.addLayout(face_clustering_eps_layout)
-        # add_face_clustering_btn = QPushButton("未知人脸聚类")
-        # add_face_clustering_btn.clicked.connect(lambda: self.add_face_clustering(face_clustering_min_samples_input.text(),face_clustering_eps_input.text()))
+        add_face_clustering_btn = QPushButton("未知人脸聚类")
+        add_face_clustering_btn.clicked.connect(lambda: self.add_face_clustering(face_clustering_min_samples_input.text(),face_clustering_eps_input.text(),restart=True))
         add_face_clustering_layout.addLayout(face_clustering_min_samples_layout)
-        # add_face_clustering_layout.addWidget(add_face_clustering_btn)
-        # add_face_clustering_layout.addWidget(add_face_clustering_btn)
+        add_face_clustering_layout.addWidget(add_face_clustering_btn)
         add_nsfw_layout = QVBoxLayout()
         add_line(add_nsfw_layout,"NSFW")
         nsfw_threshold_layout = QHBoxLayout()
@@ -848,15 +894,27 @@ class PhotoManager(QMainWindow):
         nsfw_providers_layout.addWidget(nsfw_providers_input)
         add_nsfw_layout.addLayout(nsfw_providers_layout)
         add_nsfw_layout.addLayout(nsfw_model_path_layout)
-        # nsfw_button = QPushButton("NSFW")
-        # nsfw_button.clicked.connect(lambda: self.nsfw_classify())
-        # self.unsafe_threshold = nsfw_threshold_input.text()
-        # add_nsfw_layout.addWidget(nsfw_button)
+        nsfw_button = QPushButton("NSFW 重新分类")
+        nsfw_button.clicked.connect(lambda: self.nsfw_classify(restart=True))
+        self.unsafe_threshold = nsfw_threshold_input.text()
+        add_nsfw_layout.addWidget(nsfw_button)
 
 
         layout.addLayout(add_face_clustering_layout)
         layout.addLayout(add_nsfw_layout)
-
+        duplicate_layout = QVBoxLayout()
+        add_line(duplicate_layout,"重复照片")
+        duplicate_eps_layout = QHBoxLayout()
+        duplicate_eps_label = QLabel("eps:")
+        duplicate_eps_input = QLineEdit()
+        duplicate_eps_input.setText(str(get_config(self.config,'duplicate_photo','eps',0.9)))
+        duplicate_eps_layout.addWidget(duplicate_eps_label)
+        duplicate_eps_layout.addWidget(duplicate_eps_input)
+        duplicate_button = QPushButton("重复照片")
+        duplicate_button.clicked.connect(lambda: self.duplicate_photo(duplicate_eps_input.text(),restart=True))    
+        duplicate_eps_layout.addWidget(duplicate_button)
+        duplicate_layout.addLayout(duplicate_eps_layout)
+        layout.addLayout(duplicate_layout)
         # 按钮
         button_layout = QHBoxLayout()
         save_btn = QPushButton("保存")
@@ -940,6 +998,9 @@ class PhotoManager(QMainWindow):
                     'unsafe_threshold': float(nsfw_threshold_input.text()) if nsfw_threshold_input.text() else 0.6,
                     'model_path': nsfw_model_path_input.text(),
                     'providers': nsfw_providers_input.currentText()
+                }
+                self.config['duplicate_photo'] = {
+                    'eps': float(duplicate_eps_input.text()) if duplicate_eps_input.text() else 0.3
                 }
                 if "nsfw_class" not in self.config['nsfw_classifier']:
                     self.config['nsfw_classifier']['nsfw_class'] = default_nsfw_class
@@ -1087,7 +1148,10 @@ class PhotoManager(QMainWindow):
     def resizeEvent(self, event):
         """窗口大小变化时重新排列缩略图"""
         super().resizeEvent(event)
-        if hasattr(self, 'update_preview_grid'):
+        print("resizeEvent")
+      
+        # if hasattr(setlf, 'update_preview_grid'):
+        if self.stacked_layout.currentWidget() == self.preview_page:
             self.show_preview(self.current_person, self.current_images)
     def on_scroll_area_resize(self, event):
         """处理滚动区域大小变化事件"""
@@ -1336,7 +1400,6 @@ class PhotoManager(QMainWindow):
     def new_photo_db(self):
         """新建照片数据库"""
         self.photo_db = []
-        
         dialog = QFileDialog(self)
         dialog.setWindowTitle("新建照片数据库")
         dialog.setAcceptMode(QFileDialog.AcceptSave)  # 设置为保存模式
@@ -1354,11 +1417,39 @@ class PhotoManager(QMainWindow):
                 
     def create_thread(self):
         """创建线程"""
+        print("create_thread")
         self.nsfw_classify()
         self.add_face_clustering(self.config['face_clustering']['min_samples'],self.config['face_clustering']['eps'])
-        self.duplicate_woker = RemoveDuplicatesWorker(self.photo_db,0.9)
-        self.duplicate_woker.finished.connect(self.handle_duplicates)
-        self.duplicate_woker.start()
+        self.duplicate_photo(self.config['duplicate_photo']['eps'])
+        self.process_photo_db()
+    def duplicate_photo(self,eps=0.9,restart=False):
+        """重复照片"""
+        if self.duplicate_worker is not None:
+            if self.duplicate_worker.isRunning():
+                if restart:
+                    self.duplicate_worker.terminate()
+                else:
+                    return
+        if restart:
+            for item in self.photo_db:
+                item["duplicate_index"] = None
+                # print("duplicate_index_counter",duplicate_index_counter)
+                # print("duplicate_index_counter",duplicate_index_counter)
+        duplicate_index=[item["duplicate_index"] for item in self.photo_db if item["duplicate_index"] is not None]
+        duplicate_index_counter=Counter(duplicate_index)
+                # print("duplicate_index_counter",duplicate_index_counter)
+        for item in self.photo_db:
+            if item["duplicate_index"] is not None:
+                if duplicate_index_counter[item["duplicate_index"]] <= 1:
+                    item["duplicate_index"] = -1
+        no_duplicate_photo = [item for item in self.photo_db if item["duplicate_index"] is None]
+        # if len(no_duplicate_photo) >100 :
+        #     duplicates_db = no_duplicate_photo[:100]
+        # else:
+        to_duplicates_db = no_duplicate_photo
+        self.duplicate_worker = RemoveDuplicatesWorker(to_duplicates_db,self.photo_db,self.duplicates_remover)
+        self.duplicate_worker.finished.connect(self.handle_duplicates)
+        self.duplicate_worker.start()
     def process_photo_db(self):
         """打开照片数据库"""
         if self.photo_db is None:
@@ -1366,6 +1457,10 @@ class PhotoManager(QMainWindow):
         loop = QEventLoop()
         self.progress_bar.hide()
         self.progress_bar.setValue(0)
+        #判断self.worker 是否在运行
+        if self.worker is not None:
+            if self.worker.isRunning():
+                return
         self.worker = PhotoProcessWorker(self.photo_db, self.face_organizer)
         self.worker.progress.connect(self.update_progress)
         self.worker.finished.connect(self.process_complete)
@@ -1373,12 +1468,8 @@ class PhotoManager(QMainWindow):
         self.worker.start()
         #阻塞
         loop.exec_()
-        if not self.first_process and self.photo_db_len != len(self.photo_db):
-            self.create_thread()
-        if len(self.photo_db) != 0:
-            self.first_process = False
-        self.photo_db_len = len(self.photo_db)
-        # 每10分钟执行一次
+        # self.create_thread()
+        
 
         
         self.update_person_grid()
@@ -1429,18 +1520,32 @@ class PhotoManager(QMainWindow):
                         if os.path.exists(item):
                             if is_delete_local:
                                 os.remove(item)
-                            # if item in self.current_preview_images:
-                            #     self.current_preview_images.remove(item)
+                        if item in self.current_preview_images:
+                            self.current_preview_images.remove(item)
                         path_list = [item["photo_path"] for item in self.photo_db]
                         if normalize_path(item) in path_list:
                             self.photo_db.remove(self.photo_db[path_list.index(item)])
                 # 更新界面
                 self.selected_images=[]
-                self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
+                self.is_select_page=False
+                duplicate_index=[item["duplicate_index"] for item in self.photo_db if item["duplicate_index"] is not None]
+                duplicate_index_counter=Counter(duplicate_index)
+                # print("duplicate_index_counter",duplicate_index_counter)
+                for item in self.photo_db:
+                    if item["duplicate_index"] is not None:
+                        if duplicate_index_counter[item["duplicate_index"]] <= 1:
+                            
+                            item["duplicate_index"] = None
+                            self.current_preview_images.remove(item["photo_path"])
+                        
+                            
+                
+                # self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
                 QMessageBox.information(self, "成功", "照片已删除")
-            
+
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"删除失败: {str(e)}")
+            self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
         else:
             self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
     
@@ -1712,7 +1817,7 @@ class PhotoManager(QMainWindow):
             self.show_preview(person_name=self.title, person_name_db=nsfw_list)
         else:
             self.show_preview(person_name=self.title, person_name_db=self.person_name_db)
-    def select_all(self,select_btn,heart_btn,delete_btn,sort_photo,switch_btn,database_slash,person_name, image_paths,person_name_db):
+    def select_all(self,select_btn,heart_btn,delete_btn,sort_photo,switch_btn,setting_btn,database_slash,person_name, image_paths,person_name_db):
         """选择所有照片"""
         self.is_select_page = not self.is_select_page
         if  self.is_select_page:
@@ -1727,6 +1832,8 @@ class PhotoManager(QMainWindow):
             delete_btn.setVisible(True)
             delete_btn.setEnabled(True)
             select_btn.setIcon(qta.icon("fa5s.check",color="#c8c8c8"))
+            setting_btn.setVisible(True)
+            setting_btn.setEnabled(True)
         else:
             self.show_preview(person_name=person_name, image_paths=image_paths,person_name_db=person_name_db)
     def love_photos(self,selected_images,person_name, image_paths=None,person_name_db=None):
@@ -1736,7 +1843,7 @@ class PhotoManager(QMainWindow):
             image_index=self.get_image_path_index(self.photo_db,image_path)
             self.photo_db[image_index]["star"]=True
         self.selected_images=[]
-        self.show_preview(person_name=person_name, image_paths=image_paths,person_name_db=person_name_db)
+        # self.show_preview(person_name=person_name, image_paths=image_paths,person_name_db=person_name_db)
     def cleanup_timers(self):
         for timer in self.thumbnail_timers:
             timer.stop()
@@ -1752,7 +1859,9 @@ class PhotoManager(QMainWindow):
         # sielf.image_paths = image_paths
         # 创建顶部工具栏
         toolbar = QHBoxLayout()
-        
+        self.current_images = image_paths
+        self.current_person = person_name
+
         # 返回按钮
         back_btn = KeyButton("返回")
         # 正确的返  回cards_page或者cards_page_2
@@ -1769,7 +1878,7 @@ class PhotoManager(QMainWindow):
             path_list = [item["photo_path"] for item in self.photo_db]
             person_name_db=[self.photo_db[path_list.index(item)] for item in image_paths if item in path_list]
             self.person_name_db = person_name_db
-
+        
         # 添加标题
         if person_name is not None:
             title_label = QLabel(person_name)
@@ -1799,6 +1908,13 @@ class PhotoManager(QMainWindow):
         heart_btn.clicked.connect(lambda: self.love_photos(self.selected_images,person_name, image_paths,person_name_db))
         toolbar.addWidget(heart_btn)
         # heart_btn.clicked.connect(lambda: self.love_photo(image_paths))
+        setting_btn=QPushButton()
+        setting_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
+        setting_btn.setFixedSize(40,40)
+        setting_btn.setIcon(qta.icon("fa5s.cog",color="#c8c8c8"))
+        setting_btn.setIconSize(QSize(32, 32))
+        toolbar.addWidget(setting_btn)
+        setting_btn.clicked.connect(lambda: self.setting_person_info(self.selected_images))
         select_btn=QPushButton()
         select_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
         select_btn.setFixedSize(40,40)
@@ -1839,7 +1955,7 @@ class PhotoManager(QMainWindow):
         switch_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
         switch_btn.setFixedSize(40,40)
 
-        select_btn.clicked.connect(lambda _,select_btn=select_btn,heart_btn=heart_btn,delete_btn=delete_btn,sort_photo=sort_photo,switch_btn=switch_btn,database_slash=database_slash: self.select_all(select_btn,heart_btn,delete_btn,sort_photo,switch_btn,database_slash,person_name, image_paths,person_name_db))
+        select_btn.clicked.connect(lambda _,select_btn=select_btn,heart_btn=heart_btn,delete_btn=delete_btn,sort_photo=sort_photo,switch_btn=switch_btn,database_slash=database_slash,setting_btn=setting_btn: self.select_all(select_btn,heart_btn,delete_btn,sort_photo,switch_btn,database_slash,setting_btn ,person_name, image_paths,person_name_db))
         if not self.is_select_page:
             heart_btn.setEnabled(False)
             heart_btn.setVisible(False)
@@ -1849,6 +1965,8 @@ class PhotoManager(QMainWindow):
             database_slash.setVisible(False)
             sort_photo.setEnabled(True)
             switch_btn.setEnabled(True)
+            setting_btn.setEnabled(False)
+            setting_btn.setVisible(False)
             select_btn.setIcon(qta.icon("fa5s.tasks",color="#c8c8c8"))
         else:
             delete_btn.setVisible(True)
@@ -1860,6 +1978,8 @@ class PhotoManager(QMainWindow):
             switch_btn.setEnabled(False)
             sort_photo.setEnabled(False)
             select_btn.setIcon(qta.icon("fa5s.check",color="#c8c8c8"))
+            setting_btn.setEnabled(True)
+            setting_btn.setVisible(True)
         if self.is_open_nsfw:
             switch_btn.setIcon(qta.icon("fa5s.toggle-on",color="#c8c8c8")) 
             nsfw_list=[item for item in self.person_name_db if item["is_nsfw"] == True]
@@ -1888,7 +2008,7 @@ class PhotoManager(QMainWindow):
             image_paths=[item["photo_path"] for item in person_name_db]
             duplicate_index=[item["duplicate_index"] for item in person_name_db]
             cows=Counter(duplicate_index)
-
+            # print("cows",cows)
         else:
             image_paths=[item["photo_path"] for item in person_name_db]
 
@@ -1906,7 +2026,7 @@ class PhotoManager(QMainWindow):
         # 添加缩略图
         row=col=0
         j=0
-        
+        duplicate_index=[item["duplicate_index"] for item in person_name_db]
         for i, path in enumerate(image_paths):
 
             # 创建缩略图容器
@@ -1995,7 +2115,7 @@ class PhotoManager(QMainWindow):
                     register_action = menu.addAction("人脸注册")
                     register_action.triggered.connect(lambda: self.register_face(image_paths[index]))
                     setting_person_info=menu.addAction("设置人物信息")
-                    setting_person_info.triggered.connect(lambda: self.setting_person_info(image_paths[index]))
+                    setting_person_info.triggered.connect(lambda: self.setting_person_info([image_paths[index]]))
                     # 添加删除选项
                     delete_action = menu.addAction("删除照片")
                     delete_action.triggered.connect(lambda: self.delete_photo(image_paths[index]))
@@ -2045,7 +2165,7 @@ class PhotoManager(QMainWindow):
             timer = QTimer()
             timer.setSingleShot(True)
             timer.timeout.connect(lambda l=thumb_label, p=path: load_thumbnail(l, p))
-            timer.start(50 * i)
+            timer.start(100 * i)
             # self.thumbnail_timers = []
 
             # 使用时:
@@ -2061,7 +2181,7 @@ class PhotoManager(QMainWindow):
             grid_layout.addWidget(thumb_container, row, col, Qt.AlignTop)
             col = col+1
             if "重复文件" in person_name:
-                if col >= cows[j]:
+                if col >= cows[duplicate_index[i]]:
                     row = row + 1
                     col = 0
                     j += 1
@@ -2074,7 +2194,7 @@ class PhotoManager(QMainWindow):
         scroll_area.setStyleSheet("border: none;")
         scroll_area.setWidget(grid_widget)
         self.preview_layout.addWidget(scroll_area)
-        
+        self.preview_page.resizeEvent = self.resizeEvent
         # 切换到预览页面
         self.stacked_layout.setCurrentWidget(self.preview_page)
     def love_photo(self,image_index,love_btn):
@@ -2151,7 +2271,7 @@ class PhotoManager(QMainWindow):
         # setting_person_info_btn.setFixedSize(100, 40)
         setting_person_info_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
         setting_person_info_btn.setIcon(qta.icon("fa5s.user-edit",color="#c8c8c8"))
-        setting_person_info_btn.clicked.connect(lambda: self.setting_person_info(image_paths[current_index]))
+        setting_person_info_btn.clicked.connect(lambda: self.setting_person_info([image_paths[current_index]]))
         toolbar.addWidget(setting_person_info_btn)
         toolbar.addWidget(love_btn)
 
@@ -2646,7 +2766,7 @@ class PhotoManager(QMainWindow):
                 self.stacked_layout.setCurrentWidget(self.cards_page)
                 self.left_btn.setEnabled(False)
                 self.right_btn.setEnabled(True)
-                self.page_title.setText("已识别人脸")  # 更新标题
+                self.page_title.setText("人物界面")  # 更新标题
             else:
                 # 切换到第二个页面（未识别/无人脸页面）
                 self.stacked_layout.setCurrentWidget(self.cards_page_2)
@@ -2705,25 +2825,22 @@ class NSFWWorker(QThread):
         self.nsfw_classifier = nsfw_classifier
         self.unsafe_threshold = unsafe_threshold
     def run(self):
-        while True:
-            if len(self.photo_db) > 0:
-                break
-            else:
-                #
-                time.sleep(0.01)
+        no_nsfw_photo =[item for item in self.photo_db if item["is_nsfw"] is None]
+        if len(no_nsfw_photo) == 0:
+            self.finished.emit(self.photo_db)
+            return
         for item in self.photo_db:
             if item["is_nsfw"] is None :
-                # print("开始检测")
+                # print("开始检测 nsfw")
                 is_nsfw,score,class_name = self.nsfw_classifier.classify_image(item["photo_path"])
-            else:
-                is_nsfw = item["is_nsfw"]
-                score = item["nsfw_score"]
-                class_name = item["nsfw_class"]
-            if score > self.unsafe_threshold:
-                    is_nsfw = True
-            item["is_nsfw"] = is_nsfw
-            item["nsfw_score"] = score
-            item["nsfw_class"] = class_name
+                if is_nsfw:
+                    item["is_nsfw"] = True
+                    item["nsfw_score"] = score
+                    item["nsfw_class"] = class_name
+                else:
+                    item["is_nsfw"] = False
+                    item["nsfw_score"] = 0
+                    item["nsfw_class"] = "safe"
         self.finished.emit(self.photo_db)
 
 # 添加人脸聚类线程
@@ -2737,7 +2854,12 @@ class FaceClusteringWorker(QThread):
     def run(self):
         embeddings = []
         all_paths = []
-        clustered_face = [item for item in self.photo_db if "face_cluster_index" in item and item["face_cluster_index"] is not None]
+        no_cluster_face =[item for item in self.photo_db if item['face_cluster_index'] is None]
+        if len(no_cluster_face) == 0:
+            self.finished.emit([])
+            return
+        clustered_face = [item for item in self.photo_db if item["face_cluster_index"] is not None and item["face_cluster_index"] != -1]
+        # print("开始人脸聚类")
         for item in self.photo_db:
             if item["embedding"] == np.array([]):
                 continue
@@ -2745,17 +2867,18 @@ class FaceClusteringWorker(QThread):
                 continue
             if item in clustered_face:
                 continue
+            if item['duplicate_index'] == -1:
+                continue
             else:
                 for clustered_item in clustered_face:
-                    similarity = self.face_organizer._calculate_cosine_similarity(item["embedding"],clustered_item["embedding"])
-                    if similarity > self.face_organizer.threshold:
+                    if self.face_organizer.compare_face_from_embedding(item["embedding"],clustered_item["embedding"]):
                         item["face_cluster_index"] = clustered_item["face_cluster_index"]
                         break
                 
         for item in self.photo_db:
             if item['embedding'] != np.array([])  and item['name'] == "未识别":
                 # print(item['name'])
-                if item["face_cluster_index"] is None:
+                if item["face_cluster_index"] is None or item["face_cluster_index"] == -1:
                     embeddings.append(item['embedding'])
                     all_paths.append(item['photo_path'])
         if len(embeddings) > 0:
@@ -2764,37 +2887,59 @@ class FaceClusteringWorker(QThread):
             self.finished.emit(clusters)
         else:
             self.finished.emit([])
-
+        # print("人脸聚类完成")
 #添加去除重复文件线程
 class RemoveDuplicatesWorker(QThread):
     finished = pyqtSignal(list)
-    def __init__(self, photo_db,similarity_threshold):
+    def __init__(self, to_duplicate_photo,photo_db,duplicates_remover):
         super().__init__()
+        self.to_duplicate_photo = to_duplicate_photo
         self.photo_db = photo_db
-        self.duplicates_remover = DuplicateRemover(similarity_threshold=similarity_threshold)
+        self.duplicates_remover = duplicates_remover
+        # self.duplicates_remover = DuplicateRemover(similarity_threshold=similarity_threshold)
     def run(self):
+        # print("开始去重")
+        # no_duplicates_photo =[item for item in self.photo_db if item["duplicate_index"] is None]
+        if len(self.to_duplicate_photo) == 0:
+            self.finished.emit(self.photo_db)
+            return
         duplicates_index=[item['duplicate_index'] for item in self.photo_db if 'duplicate_index' in item and item['duplicate_index'] is not None]
-        for i in range(len(self.photo_db)):
-            if 'duplicate_index' not in self.photo_db[i] or self.photo_db[i]['duplicate_index'] is  None:
-                for j in range(len(self.photo_db)):
-                    if i == j:
-                        continue
-                    if self.duplicates_remover.compare_images(self.photo_db[i]['photo_path'],self.photo_db[j]['photo_path']):
-                        if 'duplicate_index' in self.photo_db[j] and self.photo_db[j]['duplicate_index'] is not None:
-                            self.photo_db[i]['duplicate_index'] = self.photo_db[j]['duplicate_index']
+        self.duplicates_remover.build_annoy_index(self.photo_db)
+        for i in range(len(self.to_duplicate_photo)):
+            # print("开始去重 ",i)
+            similar_photo = self.duplicates_remover.find_similar_by_annoy_deep(self.to_duplicate_photo[i]['photo_path'])
+            image_index_2 = self.photo_db.index(self.to_duplicate_photo[i])
+            if len(similar_photo) > 1:
+                # print("len(similar_photo)",len(similar_photo))
+                # self.to_duplicate_photo[i]['duplicate_index'] = -1
+            #    ? image_index_2 = self.photo_db.index(self.to_duplicate_photo[i])
+                for item in similar_photo:
+                    image_path_list = [item['photo_path'] for item in self.photo_db]
+                    image_index_1 = image_path_list.index(item)
+                    # image_index_2 = image_path_list.index(self.to_duplicate_photo[i]['photo_path'])
+                    if image_index_1 != -1 and image_index_2 != -1:
+                        if image_index_1 == image_index_2:
+                            continue
+                        if self.photo_db[image_index_1]['duplicate_index'] is not None and self.photo_db[image_index_1]['duplicate_index'] != -1:
+                            self.photo_db[image_index_2]['duplicate_index'] = self.photo_db[image_index_1]['duplicate_index']
                             break
                         else:
                             index = 0
                             while True:
                                 if index not in duplicates_index:
-                                    self.photo_db[i]['duplicate_index'] = index
-                                    self.photo_db[j]['duplicate_index'] = index
+                                    self.photo_db[image_index_1]['duplicate_index'] = index
+                                    self.photo_db[image_index_2]['duplicate_index'] = index
                                     duplicates_index.append(index)
                                     break
                                 index+=1
                             break
+            else:  
+                # print("去重完成 -1",image_index_2)
+                self.photo_db[image_index_2]['duplicate_index'] =  -1
+            # print("去重完成",i)
+        # print("去重完成")    
         self.finished.emit(self.photo_db)
-            
+        return
 # 添加工作线程类
 class PhotoProcessWorker(QThread):
     """照片处理工作线程"""
@@ -2862,12 +3007,11 @@ class PhotoProcessWorker(QThread):
                 if item["nsfw_class"] not in results['face_db']:
                         results['face_db'][item["nsfw_class"]] = []
                 results['face_db'][item["nsfw_class"]].append(item["photo_path"])
-            if 'face_cluster_index' in item and item["face_cluster_index"] is not None:
+            if item["face_cluster_index"] is not None and not item['face_cluster_index'] == -1:
                 if "未知人物_{}".format(item["face_cluster_index"]) not in results['face_db']:
                     results['face_db']["未知人物_{}".format(item["face_cluster_index"])] = []
                 results['face_db']["未知人物_{}".format(item["face_cluster_index"])].append(item["photo_path"])
-            if 'duplicate_index' in item and item["duplicate_index"] is not None:
-                duplicate_index_category = "重复文件_{}".format(item["duplicate_index"])
+            if item["duplicate_index"] is not None and item['duplicate_index'] != -1:
                 if "重复文件" not in results['face_db']:
                     results['face_db']["重复文件"] = []
                 results['face_db']["重复文件"].append(item["photo_path"])
