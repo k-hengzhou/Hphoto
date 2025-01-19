@@ -24,8 +24,8 @@
         "backup": false
     },
     "face_clustering": {
-        "min_samples": 7,
-        "eps": 0.2
+        "min_samples": 5,
+        "eps": 0.3
     },
     "nsfw_classifier": {
         "unsafe_threshold": 0.6,

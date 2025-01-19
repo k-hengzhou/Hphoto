@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import cv2
 import time
+from datetime import datetime
 def normalize_path(path):
     """统一处理文件路径
     
@@ -115,7 +116,8 @@ def copy_photo(person_name,image_path,last_folder):
             # 获取时间戳
             timestamp = int(time.time())
             #时间戳格式化,年月日时分秒，年份只取后两位，月份和日期只取一位，时分秒只取两位
-            timestamp = time.strftime("%y%m%d%H%M%", time.localtime(timestamp))
+            # timestamp = time.strftime("%y%m%d%H%M%", time.localtime(timestamp))
+            timestamp = datetime.now().strftime("%y%m%d%H%M%S%f")[:15]
 
             dest_path = os.path.join(person_dir, f"{person_name}_{timestamp}.jpg")
             shutil.copy(image_path, dest_path)

@@ -29,6 +29,7 @@ import numpy as np
 from collections import Counter
 import random
 from PyQt5.QtCore import QEventLoop
+from PyQt5.QtWidgets import QWidgetItem
 # 在创建QApplication之前设置高DPI缩放
 QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
 QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
@@ -553,7 +554,7 @@ class PhotoManager(QMainWindow):
         """清理人脸数据库"""
         msg = clean_face_database(db_path=db_path,output_path=output_path,method=method,eps=float(eps),min_samples=int(min_samples)   ,backup=backup)
         QMessageBox.information(self, "清理结果", msg)
-    def add_face_clustering(self,min_samples,eps,restart=False):
+    def add_face_clustering(self,min_samples=None,eps=None,restart=False):
         """添加人脸聚类"""
         if self.face_clustering_worker is not None:
             if self.face_clustering_worker.isRunning():
@@ -564,12 +565,17 @@ class PhotoManager(QMainWindow):
         if restart:
             for item in self.photo_db:
                 item["face_cluster_index"] = None
+            if min_samples is None:
+                min_samples = get_config(self.config,'face_clustering','min_samples',1)
+            if eps is None:
+                eps = get_config(self.config,'face_clustering','eps',0.3)
+            self.face_clusterer = FaceClusterer(eps=float(eps),min_samples=int(min_samples))
         self.face_clustering_worker = FaceClusteringWorker(self.photo_db,self.face_clusterer,self.face_organizer)
         self.face_clustering_worker.finished.connect(self.handle_face_clustering)
         self.face_clustering_worker.start()
         # msg = add_face_clustering(min_samples=int(min_samples),eps=float(eps))
         # QMessageBox.information(self, "人脸聚类结果", msg)
-    def nsfw_classify(self,restart=False):
+    def nsfw_classify(self,model_path=None,providers=None,threshold=None,restart=False):
         """NSFW分类"""
         if self.nsfw_worker is not None:
             if self.nsfw_worker.isRunning():
@@ -582,6 +588,16 @@ class PhotoManager(QMainWindow):
                 item["is_nsfw"] = None
                 item["nsfw_score"] = 0
                 item["nsfw_class"] = ""
+            if model_path is None:
+                model_path = get_config(self.config,'nsfw_classifier','model_path','D:/project/小程序/model/640m.onnx')
+            if providers is None:
+                providers = get_config(self.config,'nsfw_classifier','providers',['CPUExecutionProvider'])
+            if threshold is None:
+                threshold = get_config(self.config,'nsfw_classifier','unsafe_threshold',0.6)
+            self.nsfw_classifier = NSFWClassifier(unsafe_threshold=float(threshold),
+                                    model_path=model_path,
+                                    providers=providers,
+                                    nsfw_class=self.nsfw_class)
         self.nsfw_worker = NSFWWorker(self.photo_db,self.nsfw_classifier,self.unsafe_threshold)
         self.nsfw_worker.finished.connect(self.handle_nsfw)
         self.nsfw_worker.start()
@@ -592,8 +608,36 @@ class PhotoManager(QMainWindow):
             self.photo_db[i]["nsfw_class"] = results[i]["nsfw_class"]
             self.photo_db[i]["is_nsfw"] = results[i]["is_nsfw"]
         # self.process_photo_db()
+    def is_in_this_page(self,person_info):
+        """判断图片是否在当前页面"""
+        if self.is_person_name(self.title):
+            if person_info["name"] == self.title:
+                return True
+        elif self.title == "全部":
+            return True
+        elif self.title == "收藏":
+            if person_info["star"]:
+                return True
+        elif self.title == "未识别":
+            if person_info["name"] == "未识别":
+                return True
+        elif self.title == "无人脸":
+            if person_info["name"] == "无人脸":
+                return True
+        elif self.title == "重复照片":
+            if person_info["duplicate_index"] is not None and person_info["duplicate_index"] != -1:
+                return True
+        if self.title in self.nsfw_class:
+            if person_info["is_nsfw"]:
+                return True
+        if self.title.split(" ")[0] == "未知人物":
+            if person_info["face_cluster_index"] != -1:
+                return True
+        return False
     def setting_person_info(self,image_path_list):
         """设置人物信息"""
+        if len(image_path_list) == 0:
+            return
         image_index=self.get_image_path_index(self.photo_db,image_path_list[0])
         gender_list =["男","女"]
         dialog = QDialog(self)
@@ -682,6 +726,13 @@ class PhotoManager(QMainWindow):
                     person_info["face_cluster_index"] = None
                 else:
                     person_info["face_cluster_index"] = -1
+            image_index=self.get_image_path_index(self.photo_db,image_path_list[0])
+            person_info = self.photo_db[image_index]
+            if self.is_in_this_page(person_info):
+                self.set_preview_border_none(image_path_list = image_path_list,remove=False)
+            else:
+                self.set_preview_border_none(image_path_list = image_path_list,remove=True)
+            print("close")
             dialog.close()
         # 取消按钮
         cancel_btn = QPushButton("取消")
@@ -895,8 +946,10 @@ class PhotoManager(QMainWindow):
         add_nsfw_layout.addLayout(nsfw_providers_layout)
         add_nsfw_layout.addLayout(nsfw_model_path_layout)
         nsfw_button = QPushButton("NSFW 重新分类")
-        nsfw_button.clicked.connect(lambda: self.nsfw_classify(restart=True))
-        self.unsafe_threshold = nsfw_threshold_input.text()
+        nsfw_button.clicked.connect(lambda: self.nsfw_classify(model_path=nsfw_model_path_input.text(),
+                                                               providers=nsfw_providers_input.currentText(),
+                                                               threshold=nsfw_threshold_input.text(),
+                                                               restart=True))
         add_nsfw_layout.addWidget(nsfw_button)
 
 
@@ -1422,7 +1475,7 @@ class PhotoManager(QMainWindow):
         self.add_face_clustering(self.config['face_clustering']['min_samples'],self.config['face_clustering']['eps'])
         self.duplicate_photo(self.config['duplicate_photo']['eps'])
         self.process_photo_db()
-    def duplicate_photo(self,eps=0.9,restart=False):
+    def duplicate_photo(self,eps=None,restart=False):
         """重复照片"""
         if self.duplicate_worker is not None:
             if self.duplicate_worker.isRunning():
@@ -1433,8 +1486,8 @@ class PhotoManager(QMainWindow):
         if restart:
             for item in self.photo_db:
                 item["duplicate_index"] = None
-                # print("duplicate_index_counter",duplicate_index_counter)
-                # print("duplicate_index_counter",duplicate_index_counter)
+            if eps is not None:
+                self.duplicate_remover = DuplicateRemover(eps=float(eps))
         duplicate_index=[item["duplicate_index"] for item in self.photo_db if item["duplicate_index"] is not None]
         duplicate_index_counter=Counter(duplicate_index)
                 # print("duplicate_index_counter",duplicate_index_counter)
@@ -1491,7 +1544,7 @@ class PhotoManager(QMainWindow):
         
         # 隐藏进度条
         self.progress_bar.hide()
-    def delete_photo(self, image_path,is_delete_local=True):
+    def delete_photo(self, image_path_list,is_delete_local=True):
         """删除照片"""
         if is_delete_local:
             tip="确定要删除这些照片吗？"
@@ -1506,48 +1559,34 @@ class PhotoManager(QMainWindow):
         if reply == QMessageBox.Yes:
             try:
                 # 删除文件
-                if isinstance(image_path,str):
-                    if os.path.exists(image_path):
-                        if is_delete_local:
-                            os.remove(image_path)
-                    # if image_path in self.current_preview_images:
-                    #     self.current_preview_images.remove(image_path)
-                    path_list = [item["photo_path"] for item in self.photo_db]
-                    if normalize_path(image_path) in path_list:
-                        self.photo_db.remove(self.photo_db[path_list.index(image_path)])
-                elif isinstance(image_path,list):
-                    for item in image_path:
-                        if os.path.exists(item):
+                if isinstance(image_path_list,list):
+                    for image_path in image_path_list:
+                        if os.path.exists(image_path):
                             if is_delete_local:
-                                os.remove(item)
-                        if item in self.current_preview_images:
-                            self.current_preview_images.remove(item)
+                                os.remove(image_path)
                         path_list = [item["photo_path"] for item in self.photo_db]
-                        if normalize_path(item) in path_list:
-                            self.photo_db.remove(self.photo_db[path_list.index(item)])
+                        for image_path in image_path_list:
+                            if normalize_path(image_path) in path_list:
+                                self.photo_db.remove(self.photo_db[path_list.index(image_path)])        
                 # 更新界面
                 self.selected_images=[]
-                self.is_select_page=False
+                # self.is_select_page=False
                 duplicate_index=[item["duplicate_index"] for item in self.photo_db if item["duplicate_index"] is not None]
                 duplicate_index_counter=Counter(duplicate_index)
-                # print("duplicate_index_counter",duplicate_index_counter)
                 for item in self.photo_db:
                     if item["duplicate_index"] is not None:
                         if duplicate_index_counter[item["duplicate_index"]] <= 1:
                             
                             item["duplicate_index"] = None
-                            self.current_preview_images.remove(item["photo_path"])
-                        
-                            
-                
-                # self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
+                            self.current_preview_images.remove(item["photo_path"])  
                 QMessageBox.information(self, "成功", "照片已删除")
-
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"删除失败: {str(e)}")
-            self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
+            self.set_preview_border_none(image_path_list=image_path_list,remove=True)
+            # self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
         else:
-            self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
+            # self.show_preview(person_name=self.title, image_paths=self.current_preview_images)
+            pass
     
     def register_face(self,image_dir=None):
         """注册新人脸"""
@@ -1836,14 +1875,80 @@ class PhotoManager(QMainWindow):
             setting_btn.setEnabled(True)
         else:
             self.show_preview(person_name=person_name, image_paths=image_paths,person_name_db=person_name_db)
+    def set_preview_border_none(self,image_path_list=None,remove =False):
+        """清除预览"""
+        preview_layout = self.preview_layout
+        for i in range(preview_layout.count()):
+            item = preview_layout.itemAt(i)
+            if isinstance(item, QWidgetItem):
+                thumb_layout = item.widget()
+                if isinstance(thumb_layout, QScrollArea):
+                    grid_layout = thumb_layout.widget().layout()
+                    if isinstance(grid_layout,QGridLayout):
+                        count = grid_layout.count()
+                        j=0
+                        while j < count:
+                            try:
+                                widget = grid_layout.itemAt(j).widget()
+                            except:
+                                j=j+1
+                                continue
+                            if widget:
+                                thumb_label=widget.findChild(QLabel)
+                                thumb_label.setStyleSheet("border: none;")
+                                if remove:
+                                    if hasattr(thumb_label,"image_path"): 
+                                        if thumb_label.image_path in image_path_list:
+                                            # j=grid_layout.indexOf(widget)
+                                            print("remove",j)
+                                            grid_layout.removeWidget(widget)
+                                            widget.deleteLater()
+                                            j=j-1
+                                            remaining_widgets =[]
+                                            while grid_layout.count() > 0:
+                                                item = grid_layout.itemAt(0)
+                                                if item.widget():
+                                                    remaining_widgets.append(item.widget())
+                                                    grid_layout.removeItem(item)
+                                                    # item.widget().deleteLater()
+                                                            # 计算当前grid的列数
+                                            scroll_width = self.scroll_area.viewport().width()
+                                            thumbnail_size = 200  # 假设缩略图大小是200
+                                            scale = 1.2
+                                            thumbnail_size = int(thumbnail_size * scale)
+                                            cols = max(1, (scroll_width) // (thumbnail_size))
+                                            row =col=0
+                                            for widget in remaining_widgets:
+                                                grid_layout.addWidget(widget,row,col)
+                                                col += 1
+                                                if col >= cols:
+                                                    col = 0
+                                                    row += 1
+                                            grid_layout.update()
+                            # ？?("count",count,"j",j)
+                            j += 1
+                        grid_layout.update()
+    def set_preview_button_visible(self,preview_layout,is_visible):
+        """设置预览按钮的可见性"""
+        for i in range(preview_layout.count()):
+            item = preview_layout.itemAt(i)
+            if isinstance(item, QHBoxLayout):
+                thumb_layout = item.widget()
+                if isinstance(thumb_layout,QHBoxLayout):
+                    for j in range(thumb_layout.count()):
+                        widget = thumb_layout.itemAt(j).widget()
+                        if widget:
+                            if isinstance(widget, QPushButton):
+                                widget.setVisible(is_visible)
     def love_photos(self,selected_images,person_name, image_paths=None,person_name_db=None):
         """爱心按钮"""
-        self.is_select_page=False
+        # self.is_select_page=False
         for image_path in selected_images:
             image_index=self.get_image_path_index(self.photo_db,image_path)
             self.photo_db[image_index]["star"]=True
         self.selected_images=[]
-        # self.show_preview(person_name=person_name, image_paths=image_paths,person_name_db=person_name_db)
+        self.set_preview_border_none()
+        
     def cleanup_timers(self):
         for timer in self.thumbnail_timers:
             timer.stop()
@@ -1889,13 +1994,15 @@ class PhotoManager(QMainWindow):
         toolbar.addStretch()
         delete_btn=KeyButton(tooltip="删除本地照片")
         delete_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
-        delete_btn.setFixedSize(40,40)
+        # delete_btn.setFixedSize(40,40)
         delete_btn.setIcon(qta.icon("fa5s.trash",color="#c8c8c8"))
+        delete_btn.setIconSize(QSize(32, 32))
         database_slash=KeyButton("",tooltip="移出数据库")
         database_slash.setIcon(qta.icon("fa5s.trash-alt",color="#c8c8c8"))
         # database_slash.setToolTip("删除数据库")
         database_slash.setStyleSheet(SWITCH_BUTTON_STYLE)
-        database_slash.setFixedSize(40,40)
+        database_slash.setIconSize(QSize(32, 32))
+        # database_slash.setFixedSize(40,40)
         database_slash.clicked.connect(lambda: self.delete_photo(self.selected_images,is_delete_local=False))
         toolbar.addWidget(delete_btn)
         toolbar.addWidget(database_slash)
@@ -1903,26 +2010,28 @@ class PhotoManager(QMainWindow):
 
         heart_btn=QPushButton()
         heart_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
-        heart_btn.setFixedSize(40,40)
+        # heart_btn.setFixedSize(40,40)
         heart_btn.setIcon(qta.icon("fa5s.heart",color="#c8c8c8"))
         heart_btn.clicked.connect(lambda: self.love_photos(self.selected_images,person_name, image_paths,person_name_db))
+        heart_btn.setIconSize(QSize(32, 32))
         toolbar.addWidget(heart_btn)
         # heart_btn.clicked.connect(lambda: self.love_photo(image_paths))
         setting_btn=QPushButton()
         setting_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
-        setting_btn.setFixedSize(40,40)
+        # setting_btn.setFixedSize(40,40)
         setting_btn.setIcon(qta.icon("fa5s.cog",color="#c8c8c8"))
         setting_btn.setIconSize(QSize(32, 32))
         toolbar.addWidget(setting_btn)
         setting_btn.clicked.connect(lambda: self.setting_person_info(self.selected_images))
         select_btn=QPushButton()
         select_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
-        select_btn.setFixedSize(40,40)
+        select_btn.setIconSize(QSize(32, 32))
+        # select_btn.setFixedSize(40,40)
         toolbar.addWidget(select_btn)
         # select_btn.clicked.connect(lambda _,select_btn=select_btn,heart_btn=heart_btn,delete_btn=delete_btn,sort_photo=sort_photo,switch_btn=switch_btn,database_slash=database_slash: self.select_all(select_btn,heart_btn,delete_btn,sort_photo,switch_btn,database_slash,person_name, image_paths,person_name_db))
         sort_photo=QPushButton()
         sort_photo.setStyleSheet(SWITCH_BUTTON_STYLE)
-        sort_photo.setFixedSize(40,40)
+        # sort_photo.setFixedSize(40,40)
         sort_photo.setIcon(qta.icon("fa5s.sort-amount-down",color="#c8c8c8")) 
         sort_photo.setIconSize(QSize(32, 32))
         sort_type =QMenu()
@@ -1953,9 +2062,10 @@ class PhotoManager(QMainWindow):
         # 添加开关
         switch_btn = KeyButton("",tooltip="NSFW switch")
         switch_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
-        switch_btn.setFixedSize(40,40)
+        # switch_btn.setFixedSize(40,40)
 
         select_btn.clicked.connect(lambda _,select_btn=select_btn,heart_btn=heart_btn,delete_btn=delete_btn,sort_photo=sort_photo,switch_btn=switch_btn,database_slash=database_slash,setting_btn=setting_btn: self.select_all(select_btn,heart_btn,delete_btn,sort_photo,switch_btn,database_slash,setting_btn ,person_name, image_paths,person_name_db))
+    #    ？ self.is_select_page=False
         if not self.is_select_page:
             heart_btn.setEnabled(False)
             heart_btn.setVisible(False)
@@ -2019,7 +2129,8 @@ class PhotoManager(QMainWindow):
         base_size = 200
         scale = 1.2
         thumbnail_size = int(base_size * scale)
-        scroll_width = self.width()  # 使用完整宽度
+        # 使用可视区域宽度
+        scroll_width = self.scroll_area.viewport().width()  # 使用完整宽度
         columns = max(1, scroll_width // thumbnail_size)
         self.image_paths = image_paths
         person_info_label=QLabel()
@@ -2087,7 +2198,7 @@ class PhotoManager(QMainWindow):
                     # 将事件处理器绑定到标签
                 thumb_label.enterEvent = enterEvent
                 thumb_label.leaveEvent = leaveEvent
-            create_hover_handler(thumb_label,i)   
+            # create_hover_handler(thumb_label,i)   
             
             # 添加点击事件
             def create_click_handler(index,label):
@@ -2118,9 +2229,9 @@ class PhotoManager(QMainWindow):
                     setting_person_info.triggered.connect(lambda: self.setting_person_info([image_paths[index]]))
                     # 添加删除选项
                     delete_action = menu.addAction("删除照片")
-                    delete_action.triggered.connect(lambda: self.delete_photo(image_paths[index]))
+                    delete_action.triggered.connect(lambda: self.delete_photo([image_paths[index]]))
                     database_slash_action = menu.addAction("移出数据库")
-                    database_slash_action.triggered.connect(lambda: self.delete_photo(image_paths[index],is_delete_local=False))
+                    database_slash_action.triggered.connect(lambda: self.delete_photo([image_paths[index]],is_delete_local=False))
                     open_action = menu.addAction("打开文件夹")
                     open_action.triggered.connect(lambda: QProcess.startDetached('explorer.exe', ['/select,', image_paths[index]]))
                     # 在鼠标位置显示菜单
@@ -2161,13 +2272,13 @@ class PhotoManager(QMainWindow):
             
             # 使用更大的时间间隔
             # QTimer.singleShot(50 * i, lambda l=thumb_label, p=path: load_thumbnail(l, p))
-            # def create_delayed_loader(label, path, delay):
+            
             timer = QTimer()
             timer.setSingleShot(True)
             timer.timeout.connect(lambda l=thumb_label, p=path: load_thumbnail(l, p))
-            timer.start(100 * i)
+            timer.start(50 * i)
             # self.thumbnail_timers = []
-
+            thumb_label.image_path=path
             # 使用时:
             # timer = create_delayed_loader(thumb_label, path, 50 * i)
             self.thumbnail_timers.append(timer)
@@ -2176,7 +2287,7 @@ class PhotoManager(QMainWindow):
             layout.setContentsMargins(0, 0, 0, 0)
             layout.setSpacing(0)
             layout.addWidget(thumb_label)
-            
+
             # 添加到网格
             grid_layout.addWidget(thumb_container, row, col, Qt.AlignTop)
             col = col+1
