@@ -1,11 +1,15 @@
 import sys
 import os
 import json
+import torch
+import torch.nn as nn
+from datetime import datetime
+from basicsr.utils.registry import ARCH_REGISTRY
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QScrollArea, QLabel, 
                             QFileDialog, QGridLayout, QMessageBox, QProgressBar, 
                             QDialog, QStackedWidget, QSizePolicy, QLineEdit, 
-                            QMenu, QComboBox,QCheckBox,QFrame)
+                            QMenu, QComboBox,QCheckBox,QFrame, QSpinBox, QSlider, QDialogButtonBox)
 from PyQt5.QtCore import (Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, 
                          QEasingCurve, QSize, QRect, QObject, QPoint, QEvent,QProcess)
 from PyQt5.QtGui import QPixmap, QPainter, QImage, QImageReader
@@ -50,6 +54,7 @@ person_info_base ={
             "is_nsfw":None,
             "face_cluster_index":None
         }
+RRDBNet = ARCH_REGISTRY.get('RRDBNet')
 class VSCodeTooltip(QWidget):
     def __init__(self, title, shortcut=None, description=None, parent=None):
         super().__init__(parent, Qt.ToolTip | Qt.FramelessWindowHint)
@@ -179,7 +184,7 @@ class PhotoManager(QMainWindow):
 
         super().__init__()
         self.setWindowTitle("照片管理器")
-        self.setGeometry(100, 100, 1500, 900)
+        self.setGeometry(100, 100, 1700, 1000)
         self.thumbnail_timers = []
         # 加载配置
         self.config_file = "config/config.json"
@@ -1201,10 +1206,11 @@ class PhotoManager(QMainWindow):
     def resizeEvent(self, event):
         """窗口大小变化时重新排列缩略图"""
         super().resizeEvent(event)
-        print("resizeEvent")
+        # print("resizeEvent")
       
         # if hasattr(setlf, 'update_preview_grid'):
         if self.stacked_layout.currentWidget() == self.preview_page:
+            # print("resizeEvent 预览")
             self.show_preview(self.current_person, self.current_images)
     def on_scroll_area_resize(self, event):
         """处理滚动区域大小变化事件"""
@@ -1912,7 +1918,7 @@ class PhotoManager(QMainWindow):
                                                     grid_layout.removeItem(item)
                                                     # item.widget().deleteLater()
                                                             # 计算当前grid的列数
-                                            scroll_width = self.scroll_area.viewport().width()
+                                            scroll_width = self.width()
                                             thumbnail_size = 200  # 假设缩略图大小是200
                                             scale = 1.2
                                             thumbnail_size = int(thumbnail_size * scale)
@@ -2129,9 +2135,10 @@ class PhotoManager(QMainWindow):
         base_size = 200
         scale = 1.2
         thumbnail_size = int(base_size * scale)
-        # 使用可视区域宽度
-        scroll_width = self.scroll_area.viewport().width()  # 使用完整宽度
+        # 使用区域完整宽度
+        scroll_width = self.width()  # 使用完整宽度
         columns = max(1, scroll_width // thumbnail_size)
+        
         self.image_paths = image_paths
         person_info_label=QLabel()
         # 添加缩略图
@@ -2323,6 +2330,130 @@ class PhotoManager(QMainWindow):
             love_icon = qta.icon("fa5s.heart",color="#c8c8c8",border=True,border_color="#c8c8c8")
             love_btn.setIcon(love_icon)
         # self.show_photo(image_paths,current_index)
+    def up_photo(self, image_paths, current_index):
+        input_path = image_paths[current_index]
+        output_dir = os.path.join(os.path.dirname(input_path), "upscaled")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = normalize_path(os.path.join(output_dir, f"upscaled_{os.path.basename(input_path)}"))
+        
+        # 创建设置对话框
+        options_dialog = QDialog(self)
+        options_dialog.setWindowTitle("超分辨率设置")
+        layout = QVBoxLayout(options_dialog)
+        
+        # 添加模型选择
+        model_combo = QComboBox()
+        model_combo.setStyleSheet(COMBOBOX_STYLE)
+        model_combo.addItems(['RealESRGAN_x4plus', 'RealESRGAN_x4plus_anime_6B'])
+        layout.addWidget(QLabel("选择模型:"))
+        layout.addWidget(model_combo)
+        
+        # 添加放大倍数选择
+        scale_spin = QSpinBox()
+
+        scale_spin.setStyleSheet("background-color: #1e1e1e; color: white;")
+        scale_spin.setRange(2, 4)
+        scale_spin.setValue(4)
+        layout.addWidget(QLabel("放大倍数:"))
+        layout.addWidget(scale_spin)
+        
+        # 添加降噪强度滑块
+        denoise_slider = QSlider(Qt.Horizontal)
+        denoise_slider.setStyleSheet("background-color: #1e1e1e; color: white;")
+        denoise_slider.setRange(0, 100)
+        denoise_slider.setValue(50)
+        layout.addWidget(QLabel("降噪强度:"))
+        layout.addWidget(denoise_slider)
+        
+        # 添加确认按钮
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.setStyleSheet("background-color: #1e1e1e; color: white;")
+        buttons.accepted.connect(options_dialog.accept)
+        buttons.rejected.connect(options_dialog.reject)
+        layout.addWidget(buttons)
+        
+        if options_dialog.exec_() == QDialog.Accepted:
+            # 创建进度对话框
+            progress_dialog = QDialog(self)
+            progress_dialog.setWindowTitle("处理中")
+            # progress_dialog.setFixedSize(300, 100)
+            dialog_layout = QVBoxLayout(progress_dialog)
+
+            
+            # 添加进度条
+            progress_bar = QProgressBar()
+            progress_bar.setTextVisible(True)
+            dialog_layout.addWidget(progress_bar)
+            
+            # 添加预览标签
+            preview_label = QLabel()
+            preview_label.setAlignment(Qt.AlignCenter)
+            dialog_layout.addWidget(preview_label)
+            # 创建并启动工作线程
+            self.upscale_worker = UpscaleWorker(
+                input_path, 
+                output_path,
+                scale=scale_spin.value(),
+                model_name=model_combo.currentText(),
+                denoise_strength=denoise_slider.value() / 100.0
+            )
+            
+            # 连接信号
+            def update_progress(value):
+                progress_bar.setValue(value)
+                
+            def handle_result(output_path):
+                # 显示处理后的图片
+                # preview_dialog = QDialog(self)
+                # preview_dialog.setWindowTitle("预览")
+                # preview_dialog.setFixedSize(pixmap.size())
+                pixmap = QPixmap(output_path)
+                # 保持原尺寸显示
+                # 更新数据库
+                # 缩放图片 长超过4000 宽超过3000 则缩放
+                print(pixmap.width(),pixmap.height())
+                if pixmap.width() > 1000 or pixmap.height() > 1000:
+                    pixmap = pixmap.scaled(
+                        QSize(1000, 1000),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+
+                # dialog_layout.addWidget(pixmap)
+                # 保持原尺寸显示
+                preview_label.setFixedSize(pixmap.size())
+                preview_label.setPixmap(pixmap)
+                buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+                buttons.setStyleSheet("background-color: #1e1e1e; color: white;")
+                buttons.accepted.connect(progress_dialog.accept)
+                buttons.rejected.connect(progress_dialog.reject)
+                dialog_layout.addWidget(buttons)
+                # dialog_layout.addWidget(preview_label)
+                # new_item = self.photo_db[self.get_image_path_index(self.photo_db, input_path)].copy()
+                # new_item['photo_path'] = normalize_path(output_path)
+                # new_item['add_time'] = datetime.now().strftime('%Y%m%d_%H%M%S')
+                # self.photo_db.append(new_item)
+            
+            def on_finished():
+                while progress_dialog.isVisible():
+                    QApplication.processEvents()
+                # progress_dialog.close()
+                if progress_dialog.result() == QDialog.Accepted:
+                    # 更新数据库
+                    new_item = self.photo_db[self.get_image_path_index(self.photo_db, input_path)]
+                    new_item['photo_path'] = normalize_path(output_path)
+                    # new_item['add_time'] = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    # self.photo_db.append(new_item)
+                    self.show_photo([output_path],0)
+                else:
+                    progress_dialog.close()
+            self.upscale_worker.progress.connect(update_progress)
+            self.upscale_worker.result.connect(handle_result)
+            self.upscale_worker.finished.connect(on_finished)
+            
+            # 显示进度对话框并启动处理
+            progress_dialog.show()
+            self.upscale_worker.start()
     def show_photo(self, image_paths, current_index):
 
         """显示单张照片查看界面"""
@@ -2383,10 +2514,16 @@ class PhotoManager(QMainWindow):
         setting_person_info_btn.setStyleSheet(SWITCH_BUTTON_STYLE)
         setting_person_info_btn.setIcon(qta.icon("fa5s.user-edit",color="#c8c8c8"))
         setting_person_info_btn.clicked.connect(lambda: self.setting_person_info([image_paths[current_index]]))
+        setting_person_info_btn.setIconSize(QSize(32, 32))
         toolbar.addWidget(setting_person_info_btn)
+        # toolbar.addWidget(love_btn)
+        up_btn=QPushButton()
+        # up_btn.setFixedSize(40,40)
+        up_btn.setIcon(qta.icon("fa5s.magic",color="#c8c8c8"))
+        up_btn.setIconSize(QSize(32, 32))
+        up_btn.clicked.connect(lambda: self.up_photo(image_paths,current_index))
+        toolbar.addWidget(up_btn)
         toolbar.addWidget(love_btn)
-
-
         # 将工具栏容器添加到主布局
         main_layout.addWidget(toolbar_widget)
         
@@ -3222,6 +3359,185 @@ class ProcessWorker(QThread):
                 self.total_register_person_info.append(person_info)
         self.finished.emit(self.total_register_person,self.total_register_person_info)
         self.total_register_person ={}
+class UpscaleWorker(QThread):
+    progress = pyqtSignal(int)  # 进度信号
+    result = pyqtSignal(str)    # 结果信号
+    finished = pyqtSignal()     # 完成信号
+
+    def __init__(self, input_path, output_path, scale=4, model_name='RealESRGAN_x4plus', denoise_strength=0.5):
+        super().__init__()
+        self.input_path = input_path
+        self.output_path = output_path
+        self.scale = scale
+        self.model_name = model_name
+        self.denoise_strength = denoise_strength
+        self.tile_size = 512
+        self.tile_pad = 32
+
+    def run(self):
+        try:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            print(f"使用设备: {device}")
+            
+            # 根据不同模型选择不同的参数
+            if self.model_name == 'RealESRGAN_x4plus':
+                model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, 
+                              num_block=23, num_grow_ch=32, scale=4)
+            elif self.model_name == 'RealESRGAN_x4plus_anime_6B':
+                model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, 
+                              num_block=6, num_grow_ch=32, scale=4)
+            else:
+                raise ValueError(f"不支持的模型类型: {self.model_name}")
+            
+            # 加载模型权重
+            model_path = f'model/{self.model_name}.pth'
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"模型文件不存在: {model_path}")
+                
+            loadnet = torch.load(model_path, map_location=device)
+            print("模型加载成功")
+            
+            # 检查是否包含 params_ema
+            if 'params_ema' not in loadnet:
+                if 'params' in loadnet:
+                    loadnet['params_ema'] = loadnet['params']
+                else:
+                    raise ValueError("模型文件格式错误，找不到参数")
+            
+            model.load_state_dict(loadnet['params_ema'])
+            model.eval()
+            model = model.to(device)
+            
+            # 清理不需要的变量
+            del loadnet
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
+            
+            # 读取中文路径图片
+            img = cv2.imdecode(np.fromfile(self.input_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                raise ValueError(f"无法读取图片: {self.input_path}")
+            
+            print(f"输入图片尺寸: {img.shape}, 类型: {img.dtype}, 值范围: [{img.min()}, {img.max()}]")
+            
+            # 转换为RGB并归一化
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = img.astype(np.float32) / 255.
+            
+            print(f"归一化后值范围: [{img.min()}, {img.max()}]")
+            
+            img = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0)
+            img = img.to(device)
+            
+            print(f"转换为tensor后尺寸: {img.shape}")
+            
+            # 分块处理以节省显存
+            _, _, h, w = img.size()
+            tile_size = min(self.tile_size, h, w)  # 确保tile_size不大于图像尺寸
+            tile_pad = min(self.tile_pad, tile_size // 4)  # 适当调整pad大小
+            
+            stride = tile_size - 2 * tile_pad
+            h_idx_list = list(range(0, h-tile_size, stride)) + [h-tile_size]
+            w_idx_list = list(range(0, w-tile_size, stride)) + [w-tile_size]
+            E = torch.zeros(1, 3, h*self.scale, w*self.scale).to(device)
+            W = torch.zeros_like(E)
+            
+            with torch.no_grad():
+                total_patches = len(h_idx_list) * len(w_idx_list)
+                processed_patches = 0
+                
+                for h_idx in h_idx_list:
+                    for w_idx in w_idx_list:
+                        try:
+                            in_patch = img[..., h_idx:h_idx+tile_size, w_idx:w_idx+tile_size]
+                            
+                            # 检查输入patch
+                            if torch.isnan(in_patch).any():
+                                print(f"输入patch包含NaN值，跳过此patch")
+                                continue
+                                
+                            # 处理patch
+                            out_patch = model(in_patch)
+                            
+                            # 检查输出patch
+                            if torch.isnan(out_patch).any():
+                                print(f"输出patch包含NaN值，使用双线性插值替代")
+                                # 使用双线性插值作为备选
+                                out_patch = F.interpolate(in_patch, scale_factor=self.scale, 
+                                                        mode='bilinear', align_corners=False)
+                            
+                            # 添加到结果中
+                            out_patch_mask = torch.ones_like(out_patch)
+                            E[..., h_idx*self.scale:(h_idx+tile_size)*self.scale, 
+                              w_idx*self.scale:(w_idx+tile_size)*self.scale].add_(out_patch)
+                            W[..., h_idx*self.scale:(h_idx+tile_size)*self.scale, 
+                              w_idx*self.scale:(w_idx+tile_size)*self.scale].add_(out_patch_mask)
+                            
+                            # 清理临时变量
+                            del out_patch, out_patch_mask
+                            if device.type == 'cuda':
+                                torch.cuda.empty_cache()
+                            
+                        except Exception as e:
+                            print(f"处理patch时出错: {str(e)}")
+                            continue
+                        
+                        processed_patches += 1
+                        progress = (processed_patches / total_patches) * 100
+                        self.progress.emit(int(progress))
+                
+                # 确保W中没有0值
+                W = torch.where(W == 0, torch.ones_like(W), W)
+                output = E.div_(W)
+                
+                # 清理中间结果
+                del E, W
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
+                
+                # 检查最终输出
+                if torch.isnan(output).any():
+                    print("警告：最终输出包含NaN值，使用双线性插值替代")
+                    output = F.interpolate(img, scale_factor=self.scale, 
+                                        mode='bilinear', align_corners=False)
+                
+                print(f"模型输出tensor尺寸: {output.shape}")
+                print(f"模型输出值范围: [{output.min().item()}, {output.max().item()}]")
+            
+            # 转换为numpy数组
+            output = output.squeeze().permute(1, 2, 0).cpu().numpy()
+            
+            # 处理输出
+            output = np.clip(output, 0, 1)  # 确保值在0-1范围内
+            output = (output * 255).round().astype(np.uint8)  # 转换为0-255范围
+            
+            # 转换颜色空间并保存
+            output = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
+            
+            print(f"最终输出尺寸: {output.shape}")
+            print(f"最终值范围: [{output.min()}, {output.max()}]")
+            
+            # 使用更高的JPEG质量参数保存
+            _, img_encoded = cv2.imencode('.jpg', output, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            img_encoded.tofile(self.output_path)
+            
+            # 清理最终输出
+            del output, img_encoded
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
+            
+            self.result.emit(self.output_path)
+            self.finished.emit()
+            
+        except Exception as e:
+            print(f"处理出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.finished.emit()
+        finally:
+            # 确保清理所有GPU内存
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
 if __name__ == '__main__':
     # 在创建QApplication之前设置高DPI缩放
